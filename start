@@ -1,0 +1,67 @@
+#!/usr/bin/bash
+#
+# Credits: @mrismanaziz
+# FROM File-Sharing-Man <https://github.com/mrismanaziz/File-Sharing-Man/>
+# t.me/SharingUserbot & t.me/Lunatic0de
+
+# Enhanced startup script for Docker/Sevalla deployment
+
+set -e  # Exit on any error
+
+echo "🚀 Starting File-Sharing-Man Bot..."
+echo "📅 Started at: $(date)"
+echo "🐍 Python version: $(python3 --version)"
+echo "📁 Working directory: $(pwd)"
+
+# Function to handle cleanup on exit
+cleanup() {
+    echo "🛑 Shutting down gracefully..."
+    echo "🕒 Stopped at: $(date)"
+    # Add any cleanup tasks here
+    exit 0
+}
+
+# Trap SIGTERM and SIGINT for graceful shutdown
+trap cleanup SIGTERM SIGINT
+
+# Check if required environment variables are set
+echo "🔍 Checking environment variables..."
+
+if [ -z "$TG_BOT_TOKEN" ]; then
+    echo "❌ Error: TG_BOT_TOKEN environment variable is not set"
+    exit 1
+fi
+
+if [ -z "$APP_ID" ]; then
+    echo "❌ Error: APP_ID environment variable is not set"
+    exit 1
+fi
+
+if [ -z "$API_HASH" ]; then
+    echo "❌ Error: API_HASH environment variable is not set"
+    exit 1
+fi
+
+if [ -z "$CHANNEL_ID" ]; then
+    echo "❌ Error: CHANNEL_ID environment variable is not set"
+    exit 1
+fi
+
+echo "✅ Environment variables check passed"
+
+# Create logs directory if it doesn't exist
+mkdir -p /app/logs
+
+# Set log file path
+LOG_FILE="/app/logs/bot_$(date +%Y%m%d_%H%M%S).log"
+
+echo "📝 Log file: $LOG_FILE"
+
+# Start the bot with logging
+echo "🔄 Starting bot..."
+echo "📱 Bot Token: ${TG_BOT_TOKEN:0:10}..."
+echo "🔢 App ID: $APP_ID"
+echo "📺 Channel ID: $CHANNEL_ID"
+
+# Run the bot
+exec python3 main.py 2>&1 | tee "$LOG_FILE"
