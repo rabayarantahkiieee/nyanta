@@ -99,6 +99,19 @@ CUSTOM_CAPTION = os.environ.get("CUSTOM_CAPTION", None)
 # Setel True jika Anda ingin Menonaktifkan tombol Bagikan Kiriman Saluran Anda
 DISABLE_CHANNEL_BUTTON = strtobool(os.environ.get("DISABLE_CHANNEL_BUTTON", "False"))
 
+# =============================================================================
+# BROADCAST CONFIGURATION
+# =============================================================================
+
+# Delay antar pesan broadcast (dalam detik) - lebih lambat jika menggunakan placeholders
+BROADCAST_DELAY = float(os.environ.get("BROADCAST_DELAY", "0.05"))
+
+# Jumlah pesan per batch untuk broadcast
+BROADCAST_BATCH_SIZE = int(os.environ.get("BROADCAST_BATCH_SIZE", "10"))
+
+# Maksimal concurrent messages untuk broadcast
+BROADCAST_MAX_CONCURRENT = int(os.environ.get("BROADCAST_MAX_CONCURRENT", "5"))
+
 # Admin IDs are now managed through ADMINS environment variable + dynamic admin list
 # No hardcoded admin IDs for security and flexibility
 

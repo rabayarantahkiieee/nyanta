@@ -125,7 +125,7 @@ def get_user_stats(user_id):
     
     daily_limit = get_user_custom_limit(user_id)
     downloads = user_data["download_count"]
-
+    
     return {
         "today_downloads": downloads,
         "daily_limit": daily_limit,
@@ -162,7 +162,7 @@ def get_all_user_stats():
         daily_limit = get_user_custom_limit(int(user_id))
         downloads = user_data["download_count"]
         remaining = daily_limit - downloads
-
+        
         stats.append({
             "user_id": int(user_id),
             "today_downloads": downloads,
