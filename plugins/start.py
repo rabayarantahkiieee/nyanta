@@ -20,7 +20,7 @@ from config import (
     PROTECT_CONTENT,
     START_MSG,
 )
-from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats
+from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info
 from pyrogram import filters
 from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked
@@ -40,37 +40,75 @@ logger = logging.getLogger(__name__)
 # HELPER FUNCTIONS FOR BROADCAST
 # ============================================================================
 
-def replace_placeholders(text, user):
-    """Replace placeholders in text with user data"""
+def replace_placeholders(text, user, join_info=None):
+    """
+    Replace placeholders in text with user data.
+    
+    Supported placeholders:
+    • {ID} = ID pengguna
+    • {NAME} = nama pengguna (first name)
+    • {SURNAME} = nama belakang pengguna (last name)
+    • {NAMESURNAME} = nama lengkap pengguna
+    • {LANG} = bahasa pengguna (language code)
+    • {DATE} = tanggal bergabung
+    • {TIME} = waktu bergabung
+    • {WEEKDAY} = hari mingguan (nama hari dalam bahasa Indonesia)
+    • {MENTION} = menautkan ke profil pengguna
+    • {USERNAME} = username pengguna
+    
+    Legacy placeholders (for backward compatibility):
+    • {first} = same as {NAME}
+    • {last} = same as {SURNAME}
+    • {mention} = same as {MENTION}
+    • {id} = same as {ID}
+    """
     if not text:
         return text
 
     from datetime import datetime
-    import locale
-
-    try:
-        # Set locale for Indonesian day names
-        locale.setlocale(locale.LC_TIME, 'id_ID.UTF-8')
-    except:
-        pass  # Fallback to default locale
 
     now = datetime.now()
+    
+    # Get join info if not provided
+    if join_info is None:
+        join_info = {
+            'join_date': now.strftime('%d/%m/%Y'),
+            'join_time': now.strftime('%H:%M:%S'),
+            'join_weekday': 'Hari ini'
+        }
+
+    # Build full name
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    if not full_name:
+        full_name = user.first_name or 'User'
+
+    # Get language code from user
+    lang_code = 'id'  # Default to Indonesian
+    if hasattr(user, 'language_code') and user.language_code:
+        lang_code = user.language_code
 
     replacements = {
+        # New format placeholders
         '{ID}': str(user.id),
         '{NAME}': user.first_name or '',
         '{SURNAME}': user.last_name or '',
-        '{NAMESURNAME}': f"{user.first_name or ''} {user.last_name or ''}".strip(),
-        '{LANG}': 'id',  # Default to Indonesian
-        '{DATE}': now.strftime('%d/%m/%Y'),
-        '{TIME}': now.strftime('%H:%M:%S'),
-        '{WEEKDAY}': now.strftime('%A'),  # Full weekday name
-        '{MENTION}': user.mention,
-        '{USERNAME}': f"@{user.username}" if user.username else 'None'
+        '{NAMESURNAME}': full_name,
+        '{LANG}': lang_code,
+        '{DATE}': join_info.get('join_date', now.strftime('%d/%m/%Y')),
+        '{TIME}': join_info.get('join_time', now.strftime('%H:%M:%S')),
+        '{WEEKDAY}': join_info.get('join_weekday', 'Hari ini'),
+        '{MENTION}': user.mention if hasattr(user, 'mention') else f'<a href="tg://user?id={user.id}">{user.first_name or "User"}</a>',
+        '{USERNAME}': f"@{user.username}" if user.username else 'Tidak ada username',
+        
+        # Legacy placeholders (for backward compatibility)
+        '{first}': user.first_name or '',
+        '{last}': user.last_name or '',
+        '{id}': str(user.id),
+        '{mention}': user.mention if hasattr(user, 'mention') else f'<a href="tg://user?id={user.id}">{user.first_name or "User"}</a>',
     }
 
     for placeholder, value in replacements.items():
-        text = text.replace(placeholder, value)
+        text = text.replace(placeholder, str(value))
 
     return text
 
@@ -604,16 +642,12 @@ async def start_command(client: Bot, message: Message):
                 pass
     else:
         out = start_button(client)
+        # Get user join info for placeholders
+        join_info = get_user_join_info(id)
+        # Use replace_placeholders for all placeholder support
+        formatted_msg = replace_placeholders(START_MSG, message.from_user, join_info)
         await message.reply_text(
-            text=START_MSG.format(
-                first=message.from_user.first_name,
-                last=message.from_user.last_name,
-                username=f"@{message.from_user.username}"
-                if message.from_user.username
-                else None,
-                mention=message.from_user.mention,
-                id=message.from_user.id,
-            ),
+            text=formatted_msg,
             reply_markup=InlineKeyboardMarkup(out),
             quote=True,
         )
@@ -634,17 +668,14 @@ async def not_joined(client: Bot, message: Message):
     # Sync user activity even if not subscribed (to track potential users)
     sync_user_activity(id, user_name)
     
+    # Get user join info for placeholders
+    join_info = get_user_join_info(id)
+    
     buttons = fsub_button(client, message)
+    # Use replace_placeholders for all placeholder support
+    formatted_msg = replace_placeholders(FORCE_MSG, message.from_user, join_info)
     await message.reply(
-        text=FORCE_MSG.format(
-            first=message.from_user.first_name,
-            last=message.from_user.last_name,
-            username=f"@{message.from_user.username}"
-            if message.from_user.username
-            else None,
-            mention=message.from_user.mention,
-            id=message.from_user.id,
-        ),
+        text=formatted_msg,
         reply_markup=InlineKeyboardMarkup(buttons),
         quote=True,
     )

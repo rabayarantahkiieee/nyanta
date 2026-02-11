@@ -358,6 +358,62 @@ def get_user_by_id(user_id):
     finally:
         db.close()
 
+
+def get_user_join_info(user_id):
+    """
+    Get user join information for placeholder replacement.
+    Returns dict with first_seen date/time information.
+    """
+    db = get_db()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user and user.first_seen:
+            return {
+                'first_seen': user.first_seen,
+                'join_date': user.first_seen.strftime('%d/%m/%Y'),
+                'join_time': user.first_seen.strftime('%H:%M:%S'),
+                'join_weekday': get_indonesian_weekday(user.first_seen),
+                'join_iso': user.first_seen.isoformat()
+            }
+        else:
+            # Return current datetime if user not found or no first_seen
+            now = datetime.now()
+            return {
+                'first_seen': now,
+                'join_date': now.strftime('%d/%m/%Y'),
+                'join_time': now.strftime('%H:%M:%S'),
+                'join_weekday': get_indonesian_weekday(now),
+                'join_iso': now.isoformat()
+            }
+    except Exception as e:
+        print(f"Get user join info error: {e}")
+        now = datetime.now()
+        return {
+            'first_seen': now,
+            'join_date': now.strftime('%d/%m/%Y'),
+            'join_time': now.strftime('%H:%M:%S'),
+            'join_weekday': get_indonesian_weekday(now),
+            'join_iso': now.isoformat()
+        }
+    finally:
+        db.close()
+
+
+def get_indonesian_weekday(dt):
+    """
+    Get Indonesian weekday name from datetime object.
+    """
+    days = {
+        0: 'Senin',
+        1: 'Selasa',
+        2: 'Rabu',
+        3: 'Kamis',
+        4: 'Jumat',
+        5: 'Sabtu',
+        6: 'Minggu'
+    }
+    return days.get(dt.weekday(), 'Unknown')
+
 def cleanup_blocked_users(max_age_days=30):
     """
     Clean up old blocked/deleted users.
