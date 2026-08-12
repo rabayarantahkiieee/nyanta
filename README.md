@@ -29,6 +29,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Dynamic Content**: Real-time user data replacement di broadcast messages
 - **File Search**: Cari file berdasarkan nama via `/search` atau inline query (`@botusername keyword`) langsung dari chat manapun
 - **Anti-Leech Verification**: Verifikasi 2 langkah dalam bot (tanpa shortlink eksternal) sebelum user bisa ambil file, opsional & bisa diatur admin
+- **Multi-Bahasa (ID/EN)**: Pesan inti (alur ambil file, /about, error/limit) bisa diganti ke Bahasa Indonesia atau English via `/language`
 
 ## 🚀 Deployment
 
@@ -91,6 +92,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/feedback` - Kirim feedback ke developer
 - `/report` - Laporkan masalah atau bug
 - `/search <kata kunci>` - Cari file berdasarkan nama (juga bisa via inline `@botusername kata kunci`)
+- `/language` - Ganti bahasa pesan inti bot (Indonesia/English)
 - `/tutorial` - Panduan lengkap penggunaan bot
 - `/stats` - Lihat statistik bot (alias /users)
 

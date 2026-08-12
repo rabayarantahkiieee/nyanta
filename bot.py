@@ -149,6 +149,7 @@ class Bot(Client):
                 BotCommand("report", "Laporkan masalah atau bug"),
                 BotCommand("tutorial", "Panduan lengkap penggunaan bot"),
                 BotCommand("search", "Cari file berdasarkan nama"),
+                BotCommand("language", "Ganti bahasa bot / Change bot language"),
             ]
 
             # Admin commands (only visible to admins)

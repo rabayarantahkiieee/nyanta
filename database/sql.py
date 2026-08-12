@@ -5,7 +5,7 @@
 import os
 import threading
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, MetaData, Table, Boolean
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, MetaData, Table, Boolean, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.sql import func
@@ -55,6 +55,10 @@ class User(Base):
     status = Column(String(20), default=USER_STATUS_ACTIVE, nullable=False)
     is_blocked = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False)
+    language = Column(String(5), nullable=True)
+
+DEFAULT_LANGUAGE = "id"
+SUPPORTED_LANGUAGES = ("id", "en")
 
 class BotSetting(Base):
     """Generic key/value store for global bot configuration."""
@@ -107,25 +111,46 @@ try:
         try:
             with engine.connect() as conn:
                 # Check if user_id column is still INTEGER and needs to be changed to BIGINT
-                result = conn.execute("SELECT data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'user_id'")
+                result = conn.execute(text("SELECT data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'user_id'"))
                 row = result.fetchone()
                 if row and row[0] == 'integer':
                     print("[INFO] Migrating user_id column from INTEGER to BIGINT...")
-                    conn.execute("ALTER TABLE users ALTER COLUMN user_id TYPE BIGINT")
+                    conn.execute(text("ALTER TABLE users ALTER COLUMN user_id TYPE BIGINT"))
                     conn.commit()
                     print("[INFO] Database migration completed successfully")
-                
+
                 # Check if status column exists, if not add it
-                result = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'status'")
+                result = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'status'"))
                 if result.fetchone() is None:
                     print("[INFO] Adding status columns to users table...")
-                    conn.execute("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
-                    conn.execute("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE")
-                    conn.execute("ALTER TABLE users ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'"))
+                    conn.execute(text("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE"))
+                    conn.execute(text("ALTER TABLE users ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"))
                     conn.commit()
                     print("[INFO] Status columns added successfully")
+
+                # Check if language column exists, if not add it
+                result = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'language'"))
+                if result.fetchone() is None:
+                    print("[INFO] Adding language column to users table...")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR(5)"))
+                    conn.commit()
+                    print("[INFO] Language column added successfully")
         except Exception as migration_e:
             print(f"[WARNING] Database migration failed: {migration_e}")
+            # Continue execution
+    else:
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("PRAGMA table_info(users)"))
+                existing_columns = {row[1] for row in result.fetchall()}
+                if "language" not in existing_columns:
+                    print("[INFO] Adding language column to users table...")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR(5)"))
+                    conn.commit()
+                    print("[INFO] Language column added successfully")
+        except Exception as migration_e:
+            print(f"[WARNING] SQLite database migration failed: {migration_e}")
             # Continue execution
 
 except Exception as e:
@@ -795,6 +820,39 @@ def set_user_verified(user_id, hours=None):
     except Exception as e:
         db.rollback()
         print(f"Set user verified error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_user_language(user_id):
+    """Get a user's preferred language code, or None if not set."""
+    db = get_db()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        return user.language if user and user.language in SUPPORTED_LANGUAGES else None
+    except Exception as e:
+        print(f"Get user language error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def set_user_language(user_id, language):
+    """Set a user's preferred language code."""
+    if language not in SUPPORTED_LANGUAGES:
+        return False
+    db = get_db()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user:
+            user.language = language
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Set user language error: {e}")
         return False
     finally:
         db.close()

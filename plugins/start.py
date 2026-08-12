@@ -32,6 +32,7 @@ from .button import fsub_button, start_button
 from .content_utils import check_content_protection
 from .user_limits import check_user_daily_limit, get_user_stats
 from .verification import require_verification_or_prompt
+from .i18n import t
 
 # Setup logging for broadcast system
 logger = logging.getLogger(__name__)
@@ -551,7 +552,7 @@ async def start_command(client: Bot, message: Message):
                 ids = [int(int(argument[1]) / abs(client.db_channel.id))]
             except BaseException:
                 return
-        temp_msg = await message.reply("<code>Tunggu Sebentar...</code>")
+        temp_msg = await message.reply(f"<code>{t(message.from_user.id, 'please_wait')}</code>")
         try:
             messages = await get_messages(client, ids)
         except BaseException:
@@ -559,13 +560,13 @@ async def start_command(client: Bot, message: Message):
             sent = await send_custom_message(client, message.from_user.id, "error", quote=True)
             if not sent:
                 # Fallback to default message
-                await message.reply_text("<b>Telah Terjadi Error </b>🥺")
+                await message.reply_text(t(message.from_user.id, "error_generic"))
             return
         await temp_msg.delete()
 
         # Initialize limit message sent flag for this download attempt
         limit_message_sent = False
-        
+
         for msg in messages:
             # Check user daily limit first
             is_allowed = check_user_daily_limit(message.from_user.id)
@@ -576,10 +577,10 @@ async def start_command(client: Bot, message: Message):
                     sent = await send_custom_message(client, message.from_user.id, "limit", quote=True)
                     if not sent:
                         # Fallback to default message
-                        await message.reply_text("X LIMIT HARIAN HABIS!\n\nAnda sudah mencapai batas download harian.\nCoba lagi besok!", quote=True)
+                        await message.reply_text(t(message.from_user.id, "limit_exceeded"), quote=True)
                     limit_message_sent = True
                 continue
-            
+
             # Check content protection before sending
             is_allowed, content_msg = check_content_protection(msg.id, message.from_user.id)
 
@@ -589,7 +590,7 @@ async def start_command(client: Bot, message: Message):
                     sent = await send_custom_message(client, message.from_user.id, "protected", quote=True)
                     if not sent:
                         # Fallback to default message
-                        await message.reply_text("X LIMIT DOWNLOAD HABIS!\n\nKonten ini sudah mencapai batas download maksimal.", quote=True)
+                        await message.reply_text(t(message.from_user.id, "protected_limit_exceeded"), quote=True)
                 else:
                     # For other content messages (like remaining limit info)
                     await message.reply_text(content_msg, quote=True)
@@ -616,7 +617,13 @@ async def start_command(client: Bot, message: Message):
             
             # Add daily limit info to caption
             user_stats = get_user_stats(message.from_user.id)
-            daily_info = f"Limit harian: {user_stats['today_downloads']}/{user_stats['daily_limit']} (Sisa: {user_stats['remaining']})"
+            daily_info = t(
+                message.from_user.id,
+                "daily_info",
+                used=user_stats["today_downloads"],
+                limit=user_stats["daily_limit"],
+                remaining=user_stats["remaining"],
+            )
             caption = f"{caption}\n\n{daily_info}" if caption else daily_info
             
             # Add content limit info to caption if content is limited
