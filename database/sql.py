@@ -148,6 +148,13 @@ class UserReport(Base):
     status = Column(String(20), default="pending", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+class DailyStats(Base):
+    """Aggregate download count per calendar day, for growth/analytics charts."""
+    __tablename__ = "daily_stats"
+
+    date = Column(String(10), primary_key=True)
+    downloads = Column(Integer, default=0, nullable=False)
+
 class ContentDownloadLimit(Base):
     """Per-file remaining download count, set independently via /limitkonten."""
     __tablename__ = "content_download_limits"
@@ -1265,12 +1272,140 @@ def record_user_download(user_id):
 
         row.total_downloads += 1
         row.activity_score += 10
+
+        daily_row = db.query(DailyStats).filter(DailyStats.date == today).first()
+        if daily_row:
+            daily_row.downloads += 1
+        else:
+            db.add(DailyStats(date=today, downloads=1))
+
         db.commit()
         return True
     except Exception as e:
         db.rollback()
         print(f"Record user download error: {e}")
         return False
+    finally:
+        db.close()
+
+
+RANK_TIERS = (
+    ("Legendary", 1000),
+    ("Power", 500),
+    ("Regular", 200),
+    ("Active", 50),
+    ("Beginner", 10),
+    ("New", 0),
+)
+
+
+def get_rank_info(activity_score):
+    """
+    Return rank details for an activity score: current rank name, the next
+    rank up (None if already at the top), and progress (0.0-1.0) toward it.
+    Single source of truth for rank thresholds, shared by /profile and the
+    analytics rank-distribution chart.
+    """
+    tiers_asc = list(reversed(RANK_TIERS))  # New(0) ... Legendary(1000)
+    for i, (name, threshold) in enumerate(tiers_asc):
+        next_name, next_threshold = tiers_asc[i + 1] if i + 1 < len(tiers_asc) else (None, None)
+        if next_threshold is None or activity_score < next_threshold:
+            if next_threshold is None:
+                progress = 1.0
+            else:
+                span = next_threshold - threshold
+                progress = (activity_score - threshold) / span if span > 0 else 1.0
+            return {
+                "rank": name,
+                "next_rank": next_name,
+                "progress": max(0.0, min(1.0, progress)),
+                "next_threshold": next_threshold,
+            }
+    return {"rank": "Legendary", "next_rank": None, "progress": 1.0, "next_threshold": None}
+
+
+def get_daily_downloads_range(days=14):
+    """Returns [(date_str, count), ...] for the last `days` days, oldest first, zero-filled."""
+    db = get_db()
+    try:
+        today = datetime.now().date()
+        rows = {r.date: r.downloads for r in db.query(DailyStats).all()}
+        return [
+            ((today - timedelta(days=i)).isoformat(), rows.get((today - timedelta(days=i)).isoformat(), 0))
+            for i in range(days - 1, -1, -1)
+        ]
+    except Exception as e:
+        print(f"Get daily downloads range error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_user_growth_range(days=14):
+    """
+    Returns [(date_str, new_users_count), ...] for the last `days` days, oldest
+    first, derived from each user's first_seen timestamp (no separate tracking needed).
+    """
+    db = get_db()
+    try:
+        today = datetime.now().date()
+        cutoff = today - timedelta(days=days - 1)
+        rows = db.query(User.first_seen).filter(User.first_seen.isnot(None)).all()
+        counts = {}
+        for (first_seen,) in rows:
+            d = first_seen.date()
+            if d >= cutoff:
+                counts[d.isoformat()] = counts.get(d.isoformat(), 0) + 1
+        return [
+            ((today - timedelta(days=i)).isoformat(), counts.get((today - timedelta(days=i)).isoformat(), 0))
+            for i in range(days - 1, -1, -1)
+        ]
+    except Exception as e:
+        print(f"Get user growth range error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_rank_distribution():
+    """Bucket all recorded users by activity_score into rank tiers, highest tier first."""
+    db = get_db()
+    try:
+        rows = db.query(UserProfileStats.activity_score).all()
+        counts = {name: 0 for name, _ in RANK_TIERS}
+        for (score,) in rows:
+            counts[get_rank_info(score)["rank"]] += 1
+        return counts
+    except Exception as e:
+        print(f"Get rank distribution error: {e}")
+        return {name: 0 for name, _ in RANK_TIERS}
+    finally:
+        db.close()
+
+
+def get_top_users_by_activity(limit=10):
+    """Get the top N users by activity_score, joined with their username."""
+    db = get_db()
+    try:
+        rows = (
+            db.query(UserProfileStats, User.username)
+            .join(User, User.user_id == UserProfileStats.user_id)
+            .order_by(UserProfileStats.activity_score.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "user_id": stats.user_id,
+                "username": username,
+                "activity_score": stats.activity_score,
+                "total_downloads": stats.total_downloads,
+            }
+            for stats, username in rows
+        ]
+    except Exception as e:
+        print(f"Get top users by activity error: {e}")
+        return []
     finally:
         db.close()
 

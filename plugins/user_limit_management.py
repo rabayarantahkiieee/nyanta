@@ -20,6 +20,7 @@ from .user_limits import (
     get_all_user_custom_limits,
     get_user_custom_limit
 )
+from .stats_utils import make_bar
 
 @Bot.on_message(filters.command("setlimit") & filters.user(ADMINS))
 async def set_daily_download_limit(client: Bot, message: Message):
@@ -188,50 +189,50 @@ async def get_user_custom_limits_cmd(client: Bot, message: Message):
 @Bot.on_message(filters.command("userstats") & filters.user(ADMINS))
 async def get_user_statistics(client: Bot, message: Message):
     """Get user download statistics"""
+    msg = await message.reply_text("<code>Mengambil statistik user...</code>", quote=True)
     try:
-        await message.reply_text("<code>Mengambil statistik user...</code>", quote=True)
-        
         # Get user statistics
         user_stats = get_all_user_stats()
-        
+
         if not user_stats:
-            await message.edit_text("❌ <b>Belum ada data download user!</b>")
+            await msg.edit_text("❌ <b>Belum ada data download user hari ini!</b>")
             return
-        
+
         # Sort by download count (highest first)
         user_stats.sort(key=lambda x: x['today_downloads'], reverse=True)
-        
+
         # Build statistics message
         stats_lines = []
-        stats_lines.append("📊 <b>USER DOWNLOAD STATISTICS</b>")
+        stats_lines.append("📊 <b>USER DOWNLOAD STATISTICS (Hari Ini)</b>")
         stats_lines.append(f"<b>Total Users Active:</b> {len(user_stats)}")
-        stats_lines.append(f"<b>Daily Limit:</b> {user_stats[0]['daily_limit']} downloads")
+        stats_lines.append(f"<b>Daily Limit Global:</b> {user_stats[0]['daily_limit']} downloads")
         stats_lines.append("")
-        
+
         # Show top 20 users
         for i, stat in enumerate(user_stats[:20], 1):
             user_id = stat['user_id']
             downloads = stat['today_downloads']
             limit = stat['daily_limit']
             remaining = stat['remaining']
-            
+
             status = "🔴" if remaining <= 0 else "🟡" if remaining <= 1 else "🟢"
-            
+            usage_bar = make_bar(downloads / limit if limit else 0, length=8)
+
             stats_lines.append(
-                f"{status} <b>{i}.</b> User {user_id}\n"
-                f"   Downloads: {downloads}/{limit} (Sisa: {remaining})"
+                f"{status} <b>{i}.</b> User <code>{user_id}</code>\n"
+                f"   <code>{usage_bar}</code> {downloads}/{limit} (Sisa: {remaining})"
             )
-        
+
         if len(user_stats) > 20:
             stats_lines.append(f"\n📝 ...dan {len(user_stats) - 20} user lainnya")
-        
+
         stats_text = "\n".join(stats_lines)
-        
-        await message.edit_text(stats_text)
-        
+
+        await msg.edit_text(stats_text)
+
     except Exception as e:
         LOGGER(__name__).error(e)
-        await message.edit_text(f"❌ <b>Error:</b> `{e}`")
+        await msg.edit_text(f"❌ <b>Error:</b> `{e}`")
 
 @Bot.on_message(filters.command("resetlimits") & filters.user(ADMINS))
 async def reset_user_limits(client: Bot, message: Message):

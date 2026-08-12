@@ -15,6 +15,7 @@ from database.sql import (
     get_user_join_info,
     get_user_profile_stats,
     get_user_rank_position,
+    get_rank_info,
     set_user_profile_stats,
     add_feedback,
     get_recent_feedback,
@@ -23,6 +24,7 @@ from database.sql import (
     get_report_counts,
 )
 from .user_limits import get_user_stats as get_daily_download_stats
+from .stats_utils import make_bar, rank_emoji
 
 # Profile stats (total downloads, activity score, streak) are stored in the
 # database (see database/sql.py) so they survive redeploys, instead of a
@@ -111,25 +113,13 @@ async def user_profile(client, message):
         total_downloads = profile_stats["total_downloads"]
         activity_score = profile_stats["activity_score"]
         streak_days = profile_stats["streak_days"]
+        rank_info = get_rank_info(activity_score)
 
         # Get total users and stats
         users = await full_userbase()
         stats = get_db_user_stats()
         total_users = len(users)
         active_today = stats.get('active_today', 0)
-
-        # Calculate user rank
-        user_rank = "New User"
-        if activity_score >= 1000:
-            user_rank = "Legendary User"
-        elif activity_score >= 500:
-            user_rank = "Power User"
-        elif activity_score >= 200:
-            user_rank = "Regular User"
-        elif activity_score >= 50:
-            user_rank = "Active User"
-        elif activity_score >= 10:
-            user_rank = "Beginner"
 
         # Get join date
         join_info = get_user_join_info(user_id)
@@ -143,30 +133,42 @@ async def user_profile(client, message):
         downloads_today = daily_stats["today_downloads"]
         daily_limit = daily_stats["daily_limit"]
 
+        if rank_info["next_rank"]:
+            rank_progress_line = (
+                f"├ <b>Progress:</b> <code>{make_bar(rank_info['progress'])}</code> "
+                f"{rank_info['progress'] * 100:.0f}% → {rank_emoji(rank_info['next_rank'])} {rank_info['next_rank']}"
+            )
+        else:
+            rank_progress_line = "├ <b>Progress:</b> <code>██████████</code> MAX RANK"
+
+        download_bar = make_bar(downloads_today / daily_limit if daily_limit else 0)
+
         profile = f"""<b>👤 YOUR PROFILE</b>
 
-<b>📋 Basic Info:</b>
+<b>📋 Basic Info</b>
 ├ <b>Name:</b> {user.first_name} {user.last_name or ''}
 ├ <b>Username:</b> @{user.username or 'None'}
 ├ <b>User ID:</b> <code>{user.id}</code>
-└ <b>Member Since:</b> {days_active} days ago
+└ <b>Member Since:</b> {days_active} hari lalu
 
-<b>📊 Your Stats:</b>
-├ <b>Rank:</b> {user_rank}
-├ <b>Total Downloads:</b> {total_downloads}
-├ <b>Downloads Today:</b> {downloads_today}/{daily_limit}
-├ <b>Activity Score:</b> {activity_score}
-├ <b>Streak:</b> {streak_days} days
-└ <b>Position:</b> #{user_position}
+<b>{rank_emoji(rank_info['rank'])} Rank: {rank_info['rank']}</b>
+{rank_progress_line}
+└ <b>Position:</b> #{user_position} dari {total_users:,} user
 
-<b>🎯 Community:</b>
+<b>📊 Your Stats</b>
+├ <b>Total Downloads:</b> {total_downloads:,}
+├ <b>Downloads Today:</b> <code>{download_bar}</code> {downloads_today}/{daily_limit}
+├ <b>Activity Score:</b> {activity_score:,}
+└ <b>Streak:</b> 🔥 {streak_days} hari
+
+<b>🎯 Community</b>
 ├ <b>Total Users:</b> {total_users:,}
-└ <b>Active Today:</b> {active_today}
+└ <b>Active Today:</b> {active_today:,}
 
-<b>🏆 Achievements:</b>
-├ <b>Active User:</b> {"✅" if streak_days >= 7 else "❌"}
-├ <b>Power User:</b> {"✅" if activity_score >= 100 else "❌"}
-└ <b>Legend:</b> {"✅" if activity_score >= 1000 else "❌"}"""
+<b>🏆 Achievements</b>
+├ <b>Active User</b> (streak 7+): {"✅" if streak_days >= 7 else "❌"}
+├ <b>Power User</b> (score 100+): {"✅" if activity_score >= 100 else "❌"}
+└ <b>Legend</b> (score 1000+): {"✅" if activity_score >= 1000 else "❌"}"""
 
         await message.reply_text(profile, quote=True)
 

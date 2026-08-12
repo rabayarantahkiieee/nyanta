@@ -20,7 +20,7 @@ from config import (
     PROTECT_CONTENT,
     START_MSG,
 )
-from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info, record_user_download
+from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info, record_user_download, get_daily_downloads_range, get_top_users_by_activity, get_rank_info
 from pyrogram import filters
 from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked
@@ -30,6 +30,7 @@ from config import decode, get_messages, subsall, subsch, subsgc
 
 from .button import fsub_button, start_button
 from .content_utils import check_content_protection
+from .stats_utils import make_bar, rank_emoji
 from .user_limits import check_user_daily_limit, get_user_stats
 from .verification import require_verification_or_prompt
 from .i18n import t
@@ -680,19 +681,39 @@ async def get_users(client: Bot, message: Message):
     )
     users = await full_userbase(include_inactive=False)  # Only active users
     stats = get_db_user_stats()
+    downloads_today = get_daily_downloads_range(days=1)[0][1]
+    active_fraction = (stats['active_users'] / stats['total_users']) if stats['total_users'] else 0
 
-    stats_text = f"""
-<b>📊 BOT STATISTICS</b>
+    top_users = get_top_users_by_activity(limit=3)
+    if top_users:
+        medals = ["🥇", "🥈", "🥉"]
+        leaderboard = "\n".join(
+            f"{medals[i]} {rank_emoji(get_rank_info(u['activity_score'])['rank'])} "
+            f"@{u['username'] or u['user_id']} — {u['activity_score']:,} pts"
+            for i, u in enumerate(top_users)
+        )
+    else:
+        leaderboard = "<i>Belum ada data aktivitas user</i>"
 
-<b>👥 Total Users:</b> {stats['total_users']:,}
-<b>🔥 Active Users:</b> {stats['active_users']:,}
-<b>🚫 Blocked:</b> {stats['blocked_users']:,}
-<b>🗑️ Deleted:</b> {stats['deleted_users']:,}
-<b>🔥 Active Today:</b> {stats['active_today']}
+    stats_text = f"""<b>📊 BOT STATISTICS</b>
+
+<b>👥 User Breakdown</b>
+├ <b>Total:</b> {stats['total_users']:,}
+├ <b>Active:</b> <code>{make_bar(active_fraction)}</code> {stats['active_users']:,} ({active_fraction*100:.0f}%)
+├ <b>Blocked:</b> {stats['blocked_users']:,}
+└ <b>Deleted:</b> {stats['deleted_users']:,}
+
+<b>📈 Activity</b>
+├ <b>Active Today:</b> {stats['active_today']:,}
+└ <b>Downloads Today:</b> {downloads_today:,} 📥
+
+<b>🏆 Top Activity</b>
+{leaderboard}
 
 <b>💾 Database:</b> {'PostgreSQL' if 'postgresql' in DB_URI else 'SQLite'}
 <b>🔄 Status:</b> Active & Persistent
-"""
+
+💡 <i>Grafik lengkap: /analytics</i>"""
 
     await msg.edit(stats_text)
 
