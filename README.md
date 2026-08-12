@@ -98,7 +98,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/search <kata kunci>` - Cari file berdasarkan nama (juga bisa via inline `@botusername kata kunci`)
 - `/language` - Ganti bahasa pesan inti bot (Indonesia/English)
 - `/tutorial` - Panduan lengkap penggunaan bot
-- `/stats` - Lihat statistik bot (alias /users)
+- `/stats` - Lihat statistik ringkas bot
 
 ### Admin Commands
 - `/users` - Statistik pengguna bot

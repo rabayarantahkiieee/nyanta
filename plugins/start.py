@@ -673,7 +673,7 @@ async def not_joined(client: Bot, message: Message):
     )
 
 
-@Bot.on_message(filters.command(["users", "stats"]) & filters.user(ADMINS))
+@Bot.on_message(filters.command("users") & filters.user(ADMINS))
 async def get_users(client: Bot, message: Message):
     msg = await client.send_message(
         chat_id=message.chat.id, text="<code>Processing ...</code>"
@@ -1012,21 +1012,6 @@ async def send_broadcast_to_user(client, chat_id, broadcast_data, has_placeholde
     logger.error(error_msg)
     log_broadcast_error(chat_id, "MAX_RETRIES_EXCEEDED", error_msg, max_retries)
     return last_error if last_error else Exception("Unknown error")
-
-
-@Bot.on_message(filters.command("ping"))
-async def ping_pong(client, m: Message):
-    start = time()
-    current_time = datetime.utcnow()
-    uptime_sec = (current_time - START_TIME).total_seconds()
-    uptime = await _human_time_duration(int(uptime_sec))
-    m_reply = await m.reply_text("Pinging...")
-    delta_ping = time() - start
-    await m_reply.edit_text(
-        "<b>PONG!!</b>🏓 \n"
-        f"<b>• Pinger -</b> <code>{delta_ping * 1000:.3f}ms</code>\n"
-        f"<b>• Uptime -</b> <code>{uptime}</code>\n"
-    )
 
 
 @Bot.on_message(filters.command("uptime"))
