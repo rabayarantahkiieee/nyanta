@@ -56,13 +56,9 @@ OWNER = os.environ.get("OWNER", "")
 # Protect Content
 PROTECT_CONTENT = strtobool(os.environ.get("PROTECT_CONTENT", "False"))
 
-# Heroku Credentials for updater.
+# Heroku/Sevalla app identity (shown in /vars)
 HEROKU_APP_NAME = os.environ.get("HEROKU_APP_NAME", None)
 HEROKU_API_KEY = os.environ.get("HEROKU_API_KEY", None)
-
-# Custom Repo for updater.
-UPSTREAM_BRANCH = os.environ.get("UPSTREAM_BRANCH", "master")
-UPSTREAM_REPO = os.environ.get("UPSTREAM_REPO", "https://github.com/mrismanaziz/File-Sharing-Man.git")
 
 # Database
 DB_URI = os.environ.get("DATABASE_URL", "sqlite:///bot_database.db")

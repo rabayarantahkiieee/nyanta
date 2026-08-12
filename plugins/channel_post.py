@@ -124,7 +124,7 @@ async def handle_forwarded_payment_proof(client: Bot, message: Message):
             "getvar",
             "setvar",
             "speedtest",
-            "update",
+            "usage",
             "stats",
             "vars",
             "id",
@@ -160,6 +160,11 @@ async def handle_forwarded_payment_proof(client: Bot, message: Message):
             "setuserlimit",
             "deluserlimit",
             "getuserlimits",
+            "search",
+            "language",
+            "setverify",
+            "setverifydelay",
+            "analytics",
         ]
     )
 )

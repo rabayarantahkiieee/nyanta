@@ -10,7 +10,6 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Real-time User Tracking**: Simpan status subscribe user secara real-time tanpa reset
 - **Auto Command Registration**: Commands otomatis terdaftar di menu bot Telegram
 - **Heroku Management**: Set/unset environment variables via bot
-- **Auto Updater**: Update bot otomatis dari GitHub repository
 - **Speedtest**: Cek kecepatan server real-time
 - **Admin Commands**: Management tools lengkap untuk admin
 - **Broadcast**: Kirim pesan ke semua user sekaligus
@@ -75,8 +74,6 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `ADMINS`: List ID admin bot (space separated)
 - `HEROKU_APP_NAME`: Nama app Heroku
 - `HEROKU_API_KEY`: API key Heroku
-- `UPSTREAM_REPO`: Repository untuk updater
-- `UPSTREAM_BRANCH`: Branch untuk updater (default: master)
 - `SEVALLA_API_KEY`, `SEVALLA_PROJECT_ID`, `SEVALLA_SERVICE_ID`: Diperlukan untuk `/setvar`, `/delvar`, `/getvar`, `/setdb`, `/usage` (ambil dari Sevalla dashboard)
 
 ## 📱 Commands
@@ -152,11 +149,6 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/getvar VAR_NAME` - Lihat environment variable
 - `/usage` - Monitoring aplikasi Heroku
 
-### Bot Management
-- `/update` - Update bot dari GitHub repository
-- `/restart` - Restart bot
-- `/pull` - Pull update tanpa restart
-
 ### Feedback Management (Admin)
 - `/viewfeedback` - Lihat feedback dari pengguna
 - `/viewreports` - Lihat laporan masalah dari pengguna
@@ -181,10 +173,15 @@ File-Sharing-Man/
     ├── cbb.py           # Callback query handlers
     ├── channel_post.py   # Channel posting & file management
     ├── getid.py         # User ID lookup & statistics
-    ├── heroku.py        # Heroku management tools
+    ├── heroku.py        # Heroku/Sevalla management tools
     ├── link_generator.py # Link generation untuk file sharing
+    ├── search.py         # File search & inline query
+    ├── verification.py   # Anti-leech verification
+    ├── i18n.py            # ID/EN translations
+    ├── language.py        # /language command
+    ├── analytics.py        # Visual analytics dashboard
+    ├── stats_utils.py      # Shared stats formatting helpers
     ├── speedtest.py     # Server speed test functionality
-    ├── updater.py       # Bot auto-updater dari GitHub
     ├── utils.py         # Utility functions & admin tools
     ├── admin_management.py    # Admin management system
     ├── button_management.py   # Custom button management
