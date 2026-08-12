@@ -4,171 +4,125 @@
 
 import json
 import os
-from datetime import datetime, date
+from datetime import date
 
-from plugins.button_management import get_custom_message, send_custom_message
+from database.sql import (
+    get_daily_limit_config as _get_daily_limit_config,
+    set_daily_limit_config,
+    get_user_custom_limit_db,
+    set_user_custom_limit_db,
+    delete_user_custom_limit_db,
+    get_all_user_custom_limits_db,
+    try_consume_daily_download,
+    get_daily_download_count,
+    reset_all_daily_downloads,
+    get_all_daily_downloads,
+)
 
-# User limit settings
-USER_LIMITS_FILE = "user_limits.json"
+# Limit data now lives in the persistent database (see database/sql.py) so it
+# survives redeploys, instead of a local JSON file that gets wiped on
+# ephemeral hosts like Heroku.
+LEGACY_USER_LIMITS_FILE = "user_limits.json"
 
-def load_user_limits():
-    """Load user limits from file"""
-    if os.path.exists(USER_LIMITS_FILE):
-        with open(USER_LIMITS_FILE, 'r') as f:
-            return json.load(f)
-    return {
-        "daily_limits": {},
-        "config": {
-            "daily_download_limit": 2,
-            "reset_hour": 0
-        },
-        "user_custom_limits": {}  # Custom limits per user
-    }
 
-def save_user_limits(settings):
-    """Save user limits to file"""
-    with open(USER_LIMITS_FILE, 'w') as f:
-        json.dump(settings, f, indent=2)
+def _migrate_legacy_json_if_needed():
+    """One-time import of data from the old user_limits.json into the database."""
+    if not os.path.exists(LEGACY_USER_LIMITS_FILE):
+        return
+    try:
+        with open(LEGACY_USER_LIMITS_FILE, "r") as f:
+            legacy = json.load(f)
+
+        global_limit = legacy.get("config", {}).get("daily_download_limit")
+        if global_limit is not None:
+            set_daily_limit_config(global_limit)
+
+        for user_id_str, limit in legacy.get("user_custom_limits", {}).items():
+            try:
+                set_user_custom_limit_db(int(user_id_str), limit)
+            except (TypeError, ValueError):
+                continue
+
+        os.rename(LEGACY_USER_LIMITS_FILE, LEGACY_USER_LIMITS_FILE + ".migrated")
+        print("[INFO] Migrated user_limits.json into the database")
+    except Exception as e:
+        print(f"[WARNING] Failed to migrate legacy user_limits.json: {e}")
+
+
+_migrate_legacy_json_if_needed()
+
 
 def get_today_key():
     """Get today's date key for tracking"""
     return date.today().isoformat()
 
+
 def get_daily_limit_config():
-    """Get daily limit configuration"""
-    settings = load_user_limits()
-    return settings["config"]["daily_download_limit"]
+    """Get global daily limit configuration"""
+    return _get_daily_limit_config()
+
 
 def get_user_custom_limit(user_id):
     """Get custom limit for specific user, fallback to global limit"""
-    settings = load_user_limits()
-    user_id_str = str(user_id)
-    return settings["user_custom_limits"].get(user_id_str, settings["config"]["daily_download_limit"])
+    custom = get_user_custom_limit_db(user_id)
+    return custom if custom is not None else _get_daily_limit_config()
+
 
 def set_user_custom_limit(user_id, limit):
     """Set custom limit for specific user"""
-    settings = load_user_limits()
-    user_id_str = str(user_id)
-    settings["user_custom_limits"][user_id_str] = limit
-    save_user_limits(settings)
+    set_user_custom_limit_db(user_id, limit)
+
 
 def delete_user_custom_limit(user_id):
     """Delete custom limit for specific user (fallback to global)"""
-    settings = load_user_limits()
-    user_id_str = str(user_id)
-    if user_id_str in settings["user_custom_limits"]:
-        del settings["user_custom_limits"][user_id_str]
-        save_user_limits(settings)
+    delete_user_custom_limit_db(user_id)
+
 
 def get_all_user_custom_limits():
     """Get all users with custom limits"""
-    settings = load_user_limits()
-    return settings["user_custom_limits"]
+    return get_all_user_custom_limits_db()
+
 
 def check_user_daily_limit(user_id):
-    """Check if user has exceeded daily download limit"""
-    settings = load_user_limits()
-    today = get_today_key()
-    user_id_str = str(user_id)
-    
-    # Initialize user data if not exists
-    if user_id_str not in settings["daily_limits"]:
-        settings["daily_limits"][user_id_str] = {
-            "date": today,
-            "download_count": 0
-        }
-        save_user_limits(settings)
-    
-    user_data = settings["daily_limits"][user_id_str]
-    
-    # Reset if new day
-    if user_data["date"] != today:
-        user_data["date"] = today
-        user_data["download_count"] = 0
-        save_user_limits(settings)
-    
-    # Use custom limit if exists, otherwise use global limit
+    """Check if user has exceeded daily download limit, consuming one download if not."""
     daily_limit = get_user_custom_limit(user_id)
+    return try_consume_daily_download(user_id, get_today_key(), daily_limit)
 
-    if user_data["download_count"] >= daily_limit:
-        return False
-
-    remaining = daily_limit - user_data["download_count"] - 1
-
-    # Increment download count
-    user_data["download_count"] += 1
-    save_user_limits(settings)
-
-    return True
 
 def get_user_stats(user_id):
     """Get user's daily download statistics"""
-    settings = load_user_limits()
-    user_id_str = str(user_id)
-    
-    if user_id_str not in settings["daily_limits"]:
-        daily_limit = get_user_custom_limit(user_id)
-        return {
-            "today_downloads": 0,
-            "daily_limit": daily_limit,
-            "remaining": daily_limit
-        }
-    
-    user_data = settings["daily_limits"][user_id_str]
-    today = get_today_key()
-    
-    # Reset if new day
-    if user_data["date"] != today:
-        user_data["date"] = today
-        user_data["download_count"] = 0
-        save_user_limits(settings)
-    
     daily_limit = get_user_custom_limit(user_id)
-    downloads = user_data["download_count"]
-    
+    downloads = get_daily_download_count(user_id, get_today_key())
     return {
         "today_downloads": downloads,
         "daily_limit": daily_limit,
-        "remaining": daily_limit - downloads
+        "remaining": daily_limit - downloads,
     }
+
 
 def reset_all_user_limits():
     """Reset all user daily limits (admin function)"""
-    settings = load_user_limits()
-    for user_id in settings["daily_limits"]:
-        settings["daily_limits"][user_id]["download_count"] = 0
-        settings["daily_limits"][user_id]["date"] = get_today_key()
-    save_user_limits(settings)
+    reset_all_daily_downloads(get_today_key())
+
 
 def set_daily_limit(new_limit):
     """Set new daily download limit (admin function)"""
-    settings = load_user_limits()
-    settings["config"]["daily_download_limit"] = new_limit
-    save_user_limits(settings)
+    set_daily_limit_config(new_limit)
     return new_limit
+
 
 def get_all_user_stats():
     """Get all user statistics for admin"""
-    settings = load_user_limits()
     today = get_today_key()
     stats = []
-    
-    for user_id, user_data in settings["daily_limits"].items():
-        # Reset if new day
-        if user_data["date"] != today:
-            user_data["date"] = today
-            user_data["download_count"] = 0
-        
-        daily_limit = get_user_custom_limit(int(user_id))
-        downloads = user_data["download_count"]
-        remaining = daily_limit - downloads
-        
+    for row in get_all_daily_downloads(today):
+        user_id = row["user_id"]
+        downloads = row["today_downloads"]
+        daily_limit = get_user_custom_limit(user_id)
         stats.append({
-            "user_id": int(user_id),
+            "user_id": user_id,
             "today_downloads": downloads,
             "daily_limit": daily_limit,
-            "remaining": remaining
+            "remaining": daily_limit - downloads,
         })
-    
-    save_user_limits(settings)
     return stats

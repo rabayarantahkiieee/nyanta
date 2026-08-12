@@ -56,6 +56,28 @@ class User(Base):
     is_blocked = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False)
 
+class BotSetting(Base):
+    """Generic key/value store for global bot configuration."""
+    __tablename__ = "bot_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(String, nullable=True)
+
+class UserCustomLimit(Base):
+    """Per-user override of the global daily download limit."""
+    __tablename__ = "user_custom_limits"
+
+    user_id = Column(BigInteger, primary_key=True)
+    daily_limit = Column(Integer, nullable=False)
+
+class UserDailyDownload(Base):
+    """Tracks how many downloads a user made on a given date."""
+    __tablename__ = "user_daily_downloads"
+
+    user_id = Column(BigInteger, primary_key=True)
+    date = Column(String(10), nullable=False)
+    download_count = Column(Integer, default=0, nullable=False)
+
 # Create tables with error handling
 try:
     Base.metadata.create_all(bind=engine)
@@ -413,6 +435,201 @@ def get_indonesian_weekday(dt):
         6: 'Minggu'
     }
     return days.get(dt.weekday(), 'Unknown')
+
+DEFAULT_DAILY_LIMIT = 2
+DAILY_LIMIT_SETTING_KEY = "daily_download_limit"
+
+
+def get_setting(key, default=None):
+    """Get a global bot setting value (always returned as string, or default)."""
+    db = get_db()
+    try:
+        row = db.query(BotSetting).filter(BotSetting.key == key).first()
+        return row.value if row else default
+    except Exception as e:
+        print(f"Get setting error: {e}")
+        return default
+    finally:
+        db.close()
+
+
+def set_setting(key, value):
+    """Set a global bot setting value."""
+    db = get_db()
+    try:
+        row = db.query(BotSetting).filter(BotSetting.key == key).first()
+        if row:
+            row.value = str(value)
+        else:
+            db.add(BotSetting(key=key, value=str(value)))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set setting error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_daily_limit_config():
+    """Get the global daily download limit."""
+    value = get_setting(DAILY_LIMIT_SETTING_KEY)
+    try:
+        return int(value) if value is not None else DEFAULT_DAILY_LIMIT
+    except (TypeError, ValueError):
+        return DEFAULT_DAILY_LIMIT
+
+
+def set_daily_limit_config(new_limit):
+    """Set the global daily download limit."""
+    return set_setting(DAILY_LIMIT_SETTING_KEY, new_limit)
+
+
+def get_user_custom_limit_db(user_id):
+    """Get a user's custom daily limit, or None if not set."""
+    db = get_db()
+    try:
+        row = db.query(UserCustomLimit).filter(UserCustomLimit.user_id == user_id).first()
+        return row.daily_limit if row else None
+    except Exception as e:
+        print(f"Get user custom limit error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def set_user_custom_limit_db(user_id, limit):
+    """Set a user's custom daily limit."""
+    db = get_db()
+    try:
+        row = db.query(UserCustomLimit).filter(UserCustomLimit.user_id == user_id).first()
+        if row:
+            row.daily_limit = limit
+        else:
+            db.add(UserCustomLimit(user_id=user_id, daily_limit=limit))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set user custom limit error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def delete_user_custom_limit_db(user_id):
+    """Delete a user's custom daily limit. Returns True if a row was removed."""
+    db = get_db()
+    try:
+        row = db.query(UserCustomLimit).filter(UserCustomLimit.user_id == user_id).first()
+        if row:
+            db.delete(row)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Delete user custom limit error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_user_custom_limits_db():
+    """Get all users with a custom daily limit as {user_id_str: limit}."""
+    db = get_db()
+    try:
+        rows = db.query(UserCustomLimit).all()
+        return {str(r.user_id): r.daily_limit for r in rows}
+    except Exception as e:
+        print(f"Get all user custom limits error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+def try_consume_daily_download(user_id, today, daily_limit):
+    """
+    Atomically check-and-increment today's download counter for a user,
+    resetting the counter first when the stored date differs from `today`.
+    Returns True if the download is allowed (counter incremented), False if the
+    daily limit has already been reached.
+    """
+    db = get_db()
+    try:
+        row = db.query(UserDailyDownload).filter(UserDailyDownload.user_id == user_id).first()
+        if row is None:
+            row = UserDailyDownload(user_id=user_id, date=today, download_count=0)
+            db.add(row)
+        elif row.date != today:
+            row.date = today
+            row.download_count = 0
+
+        if row.download_count >= daily_limit:
+            db.commit()
+            return False
+
+        row.download_count += 1
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Try consume daily download error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_daily_download_count(user_id, today):
+    """Get today's download count for a user without incrementing it."""
+    db = get_db()
+    try:
+        row = db.query(UserDailyDownload).filter(UserDailyDownload.user_id == user_id).first()
+        if row is None or row.date != today:
+            return 0
+        return row.download_count
+    except Exception as e:
+        print(f"Get daily download count error: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+def reset_all_daily_downloads(today):
+    """Reset every user's daily download counter (admin function)."""
+    db = get_db()
+    try:
+        db.query(UserDailyDownload).update({
+            UserDailyDownload.download_count: 0,
+            UserDailyDownload.date: today,
+        })
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Reset all daily downloads error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_daily_downloads(today):
+    """Get all users' download rows relevant to `today` as list of dicts."""
+    db = get_db()
+    try:
+        rows = db.query(UserDailyDownload).all()
+        result = []
+        for row in rows:
+            count = row.download_count if row.date == today else 0
+            result.append({"user_id": row.user_id, "today_downloads": count})
+        return result
+    except Exception as e:
+        print(f"Get all daily downloads error: {e}")
+        return []
+    finally:
+        db.close()
+
 
 def cleanup_blocked_users(max_age_days=30):
     """
