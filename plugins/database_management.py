@@ -12,6 +12,7 @@ from config import ADMINS, LOGGER, DB_URI
 from pyrogram import filters
 from pyrogram.types import Message
 from database.sql import User, get_db
+from .heroku import sevalla_api_call, SEVALLA_PROJECT_ID, SEVALLA_SERVICE_ID
 
 BACKUP_DIR = "database_backups"
 
@@ -46,30 +47,34 @@ async def get_db_info(client: Bot, message: Message):
 
 @Bot.on_message(filters.command("setdb") & filters.user(ADMINS))
 async def set_db_config(client: Bot, message: Message):
-    """Set database configuration"""
+    """Set the DATABASE_URL environment variable via the Sevalla API"""
     if len(message.command) != 2:
         await message.reply_text("❌ <b>Penggunaan:</b> /setdb DATABASE_URL", quote=True)
         return
-    
+
     try:
         db_url = message.command[1]
-        
-        # Save to environment variable simulation
-        config = {
-            "database_url": db_url,
-            "last_updated": str(asyncio.get_event_loop().time())
-        }
-        
-        with open("db_config.json", "w") as f:
-            json.dump(config, f)
-        
-        await message.reply_text(
-            f"✅ <b>Database configuration berhasil diset!</b>\n\n"
-            f"<b>Database URL:</b> <code>{db_url}</code>\n"
-            f"<b>Status:</b> Ready untuk restart bot",
-            quote=True
+
+        result = sevalla_api_call(
+            "POST", f"/projects/{SEVALLA_PROJECT_ID}/services/{SEVALLA_SERVICE_ID}/env",
+            {"key": "DATABASE_URL", "value": db_url},
         )
-        
+
+        if "error" in result:
+            await message.reply_text(
+                f"❌ <b>Gagal set DATABASE_URL:</b> {result['error']}\n\n"
+                "💡 <b>Alternatif:</b> gunakan <code>/setvar DATABASE_URL VALUE</code> "
+                "atau set env var ini langsung dari dashboard hosting Anda.",
+                quote=True,
+            )
+        else:
+            await message.reply_text(
+                f"✅ <b>DATABASE_URL berhasil diset!</b>\n\n"
+                f"<b>Database URL:</b> <code>{db_url}</code>\n\n"
+                "🔄 <b>Restart bot untuk apply perubahan.</b>",
+                quote=True
+            )
+
     except Exception as e:
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
