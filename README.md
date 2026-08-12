@@ -28,6 +28,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Personalized Messages**: Placeholder variables untuk pesan personal ({ID},{NAME},{USERNAME},{DATE}, dll)
 - **Dynamic Content**: Real-time user data replacement di broadcast messages
 - **File Search**: Cari file berdasarkan nama via `/search` atau inline query (`@botusername keyword`) langsung dari chat manapun
+- **Anti-Leech Verification**: Verifikasi 2 langkah dalam bot (tanpa shortlink eksternal) sebelum user bisa ambil file, opsional & bisa diatur admin
 
 ## 🚀 Deployment
 
@@ -130,6 +131,10 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/delkonten` - Hapus file dari protected list
 - `/getkonten` - Lihat daftar protected content
 - `/limitkonten` - Set limit untuk konten tertentu
+
+### Anti-Leech Verification (Admin)
+- `/setverify on|off` - Aktifkan/nonaktifkan verifikasi anti-leech
+- `/setverifydelay DETIK` - Atur delay verifikasi (default 10 detik)
 
 ### Heroku Management
 - `/setvar VAR_NAME VAR_VALUE` - Set environment variable

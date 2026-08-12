@@ -4,7 +4,7 @@
 
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, MetaData, Table, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
@@ -77,6 +77,13 @@ class UserDailyDownload(Base):
     user_id = Column(BigInteger, primary_key=True)
     date = Column(String(10), nullable=False)
     download_count = Column(Integer, default=0, nullable=False)
+
+class UserVerification(Base):
+    """Tracks how long a user's in-bot anti-leech verification stays valid."""
+    __tablename__ = "user_verifications"
+
+    user_id = Column(BigInteger, primary_key=True)
+    verified_until = Column(DateTime(timezone=True), nullable=False)
 
 class FileIndex(Base):
     """Searchable index of files stored in the database channel."""
@@ -713,12 +720,91 @@ def get_file_index_count():
         db.close()
 
 
+VERIFICATION_ENABLED_KEY = "verification_enabled"
+VERIFICATION_DELAY_SECONDS_KEY = "verification_delay_seconds"
+VERIFICATION_VALID_HOURS_KEY = "verification_valid_hours"
+DEFAULT_VERIFICATION_DELAY_SECONDS = 10
+DEFAULT_VERIFICATION_VALID_HOURS = 24
+
+
+def is_verification_enabled():
+    """Whether the in-bot anti-leech verification gate is active."""
+    return get_setting(VERIFICATION_ENABLED_KEY, "0") == "1"
+
+
+def set_verification_enabled(enabled):
+    return set_setting(VERIFICATION_ENABLED_KEY, "1" if enabled else "0")
+
+
+def get_verification_delay_seconds():
+    value = get_setting(VERIFICATION_DELAY_SECONDS_KEY)
+    try:
+        return int(value) if value is not None else DEFAULT_VERIFICATION_DELAY_SECONDS
+    except (TypeError, ValueError):
+        return DEFAULT_VERIFICATION_DELAY_SECONDS
+
+
+def set_verification_delay_seconds(seconds):
+    return set_setting(VERIFICATION_DELAY_SECONDS_KEY, seconds)
+
+
+def get_verification_valid_hours():
+    value = get_setting(VERIFICATION_VALID_HOURS_KEY)
+    try:
+        return int(value) if value is not None else DEFAULT_VERIFICATION_VALID_HOURS
+    except (TypeError, ValueError):
+        return DEFAULT_VERIFICATION_VALID_HOURS
+
+
+def set_verification_valid_hours(hours):
+    return set_setting(VERIFICATION_VALID_HOURS_KEY, hours)
+
+
+def is_user_verified(user_id):
+    """Whether the user currently has a non-expired verification."""
+    db = get_db()
+    try:
+        row = db.query(UserVerification).filter(UserVerification.user_id == user_id).first()
+        if not row:
+            return False
+        expires_at = row.verified_until
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) < expires_at
+    except Exception as e:
+        print(f"Is user verified error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def set_user_verified(user_id, hours=None):
+    """Mark a user as verified for `hours` (defaults to the configured value)."""
+    if hours is None:
+        hours = get_verification_valid_hours()
+    db = get_db()
+    try:
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
+        row = db.query(UserVerification).filter(UserVerification.user_id == user_id).first()
+        if row:
+            row.verified_until = expires_at
+        else:
+            db.add(UserVerification(user_id=user_id, verified_until=expires_at))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set user verified error: {e}")
+        return False
+    finally:
+        db.close()
+
+
 def cleanup_blocked_users(max_age_days=30):
     """
     Clean up old blocked/deleted users.
     Optionally hard delete users who have been blocked/deleted for more than max_age_days.
     """
-    from datetime import timedelta
     db = get_db()
     try:
         cutoff_date = datetime.now() - timedelta(days=max_age_days)

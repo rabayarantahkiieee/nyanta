@@ -195,6 +195,8 @@ class Bot(Client):
                 BotCommand("setuserlimit", "Set custom limit untuk user tertentu"),
                 BotCommand("deluserlimit", "Hapus custom limit user"),
                 BotCommand("getuserlimits", "Lihat semua custom user limits"),
+                BotCommand("setverify", "Aktifkan/nonaktifkan verifikasi anti-leech"),
+                BotCommand("setverifydelay", "Set delay verifikasi (detik)"),
             ]
 
             # Set commands for all users

@@ -31,6 +31,7 @@ from config import decode, get_messages, subsall, subsch, subsgc
 from .button import fsub_button, start_button
 from .content_utils import check_content_protection
 from .user_limits import check_user_daily_limit, get_user_stats
+from .verification import require_verification_or_prompt
 
 # Setup logging for broadcast system
 logger = logging.getLogger(__name__)
@@ -524,6 +525,8 @@ async def start_command(client: Bot, message: Message):
         try:
             base64_string = text.split(" ", 1)[1]
         except BaseException:
+            return
+        if not await require_verification_or_prompt(client, message, base64_string):
             return
         string = await decode(base64_string)
         argument = string.split("-")
