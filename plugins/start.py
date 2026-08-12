@@ -609,7 +609,8 @@ async def start_command(client: Bot, message: Message):
 
             # Build custom buttons if available
             custom_buttons = get_custom_buttons()
-            
+
+            reply_markup = None
             if custom_buttons:
                 reply_markup = InlineKeyboardMarkup(custom_buttons)
             elif not DISABLE_CHANNEL_BUTTON:
@@ -640,7 +641,7 @@ async def start_command(client: Bot, message: Message):
                 )
                 await asyncio.sleep(0.5)
             except FloodWait as e:
-                await asyncio.sleep(e.x)
+                await asyncio.sleep(e.value)
                 await msg.copy(
                     chat_id=message.from_user.id,
                     caption=caption,
