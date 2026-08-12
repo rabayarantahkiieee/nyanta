@@ -27,6 +27,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Enhanced /setmsg**: Support media attachments untuk custom messages
 - **Personalized Messages**: Placeholder variables untuk pesan personal ({ID},{NAME},{USERNAME},{DATE}, dll)
 - **Dynamic Content**: Real-time user data replacement di broadcast messages
+- **File Search**: Cari file berdasarkan nama via `/search` atau inline query (`@botusername keyword`) langsung dari chat manapun
 
 ## 🚀 Deployment
 
@@ -58,6 +59,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - Default: `sqlite:///bot_database.db` (local SQLite, data may reset on redeploy)
 
 ### Optional
+- Untuk fitur inline search (`@botusername keyword`), aktifkan **Inline Mode** untuk bot melalui @BotFather (`/setinline`)
 - `FORCE_SUB_CHANNEL1`: ID channel pertama untuk force subscription
 - `FORCE_SUB_CHANNEL2`: ID channel kedua untuk force subscription (opsional)
 - `FORCE_SUB_CHANNEL3`: ID channel ketiga untuk force subscription (opsional)
@@ -87,6 +89,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/uptime` - Lihat status uptime bot
 - `/feedback` - Kirim feedback ke developer
 - `/report` - Laporkan masalah atau bug
+- `/search <kata kunci>` - Cari file berdasarkan nama (juga bisa via inline `@botusername kata kunci`)
 - `/tutorial` - Panduan lengkap penggunaan bot
 - `/stats` - Lihat statistik bot (alias /users)
 

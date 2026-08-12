@@ -148,6 +148,7 @@ class Bot(Client):
                 BotCommand("feedback", "Kirim feedback ke developer"),
                 BotCommand("report", "Laporkan masalah atau bug"),
                 BotCommand("tutorial", "Panduan lengkap penggunaan bot"),
+                BotCommand("search", "Cari file berdasarkan nama"),
             ]
 
             # Admin commands (only visible to admins)

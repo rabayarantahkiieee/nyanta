@@ -78,6 +78,18 @@ class UserDailyDownload(Base):
     date = Column(String(10), nullable=False)
     download_count = Column(Integer, default=0, nullable=False)
 
+class FileIndex(Base):
+    """Searchable index of files stored in the database channel."""
+    __tablename__ = "file_index"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(BigInteger, unique=True, index=True, nullable=False)
+    file_name = Column(String, nullable=False, index=True)
+    file_type = Column(String(20), nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    caption = Column(String, nullable=True)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
 # Create tables with error handling
 try:
     Base.metadata.create_all(bind=engine)
@@ -627,6 +639,76 @@ def get_all_daily_downloads(today):
     except Exception as e:
         print(f"Get all daily downloads error: {e}")
         return []
+    finally:
+        db.close()
+
+
+def add_file_to_index(message_id, file_name, file_type=None, file_size=None, caption=None):
+    """Add or update a file's entry in the searchable file index."""
+    if not file_name:
+        return False
+    db = get_db()
+    try:
+        row = db.query(FileIndex).filter(FileIndex.message_id == message_id).first()
+        if row:
+            row.file_name = file_name
+            row.file_type = file_type
+            row.file_size = file_size
+            row.caption = caption
+        else:
+            db.add(FileIndex(
+                message_id=message_id,
+                file_name=file_name,
+                file_type=file_type,
+                file_size=file_size,
+                caption=caption,
+            ))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add file to index error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def search_file_index(keyword, limit=20):
+    """Search indexed files by (case-insensitive) filename substring."""
+    db = get_db()
+    try:
+        pattern = f"%{keyword}%"
+        rows = (
+            db.query(FileIndex)
+            .filter(FileIndex.file_name.ilike(pattern))
+            .order_by(FileIndex.added_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "message_id": r.message_id,
+                "file_name": r.file_name,
+                "file_type": r.file_type,
+                "file_size": r.file_size,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"Search file index error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_file_index_count():
+    """Get total number of indexed files."""
+    db = get_db()
+    try:
+        return db.query(FileIndex).count()
+    except Exception as e:
+        print(f"Get file index count error: {e}")
+        return 0
     finally:
         db.close()
 
