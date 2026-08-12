@@ -810,27 +810,36 @@ async def send_text(client: Bot, message: Message):
     # Check if message contains placeholders
     has_placeholders = check_placeholders(broadcast_data.get("caption", "")) or check_placeholders(broadcast_data.get("content"))
     
-    # Get configuration values
-    delay = 0.15 if has_placeholders else 0.05
+    # Get configuration values (base/floor values for adaptive throttling below)
+    base_delay = 0.15 if has_placeholders else 0.05
     batch_size = 10  # Process in batches
-    max_concurrent = 5  # Maximum concurrent tasks
-    
+    base_max_concurrent = 5  # Maximum concurrent tasks
+    max_delay = 3.0  # Hard cap so a bad run can't stall forever
+    min_concurrent = 1
+
+    # Adaptive throttling state: tightened when FloodWaits spike, relaxed
+    # again once the send rate looks healthy. Protects large broadcasts
+    # from cascading into repeated global FloodWaits instead of just
+    # retrying the same burst rate forever.
+    current_delay = base_delay
+    current_max_concurrent = base_max_concurrent
+
     # Update initial status
     await update_progress_message(pls_wait, 0, 0, 0, 0, 0, 0)
-    
+
     logger.info(f"Starting enhanced broadcast to {len(user_ids)} users | Type: {broadcast_data['type']} | Has placeholders: {has_placeholders}")
-    
+
     # Process users in batches
     for i in range(0, len(user_ids), batch_size):
         batch = user_ids[i:i + batch_size]
-        
+
         # Create tasks for this batch
         tasks = []
         for chat_id in batch:
             # Skip admins
             if chat_id in ADMINS:
                 continue
-            
+
             tasks.append(send_broadcast_to_user(
                 client=client,
                 chat_id=chat_id,
@@ -838,16 +847,17 @@ async def send_text(client: Bot, message: Message):
                 has_placeholders=has_placeholders,
                 max_retries=max_retries
             ))
-        
+
         # Process batch with concurrency control
         if tasks:
-            # Process tasks in chunks to respect max_concurrent
-            for j in range(0, len(tasks), max_concurrent):
-                chunk = tasks[j:j + max_concurrent]
-                
+            # Process tasks in chunks to respect the current concurrency limit
+            batch_flood_waits = 0
+            for j in range(0, len(tasks), current_max_concurrent):
+                chunk = tasks[j:j + current_max_concurrent]
+
                 # Execute chunk concurrently
                 results = await asyncio.gather(*chunk, return_exceptions=True)
-                
+
                 # Process results
                 for result in results:
                     if isinstance(result, Exception):
@@ -858,22 +868,39 @@ async def send_text(client: Bot, message: Message):
                             deleted += 1
                         elif isinstance(result, FloodWait):
                             flood_waits += 1
+                            batch_flood_waits += 1
                         else:
                             unsuccessful += 1
-                        
+
                         logger.error(f"Broadcast error: {str(result)}")
                     else:
                         # Successful result
                         successful += 1
-                    
+
                     total += 1
-                    
+
                     # Update progress every 10 users
                     if total % 10 == 0:
                         await update_progress_message(pls_wait, total, successful, unsuccessful, blocked, deleted, flood_waits)
-                
+
                 # Rate limiting
-                await asyncio.sleep(delay)
+                await asyncio.sleep(current_delay)
+
+            # Adapt pacing for the NEXT batch based on how this one went.
+            # >10% of this batch hitting FloodWait: back off (slower + less
+            # concurrent). Otherwise, if we'd previously backed off and this
+            # batch was clean, ease back toward the baseline pace.
+            batch_flood_rate = batch_flood_waits / len(tasks) if tasks else 0
+            if batch_flood_rate > 0.1:
+                current_delay = min(max_delay, current_delay * 2)
+                current_max_concurrent = max(min_concurrent, current_max_concurrent - 1)
+                logger.warning(
+                    f"Broadcast throttling engaged: {batch_flood_waits}/{len(tasks)} FloodWaits in batch. "
+                    f"delay={current_delay:.2f}s concurrency={current_max_concurrent}"
+                )
+            elif batch_flood_waits == 0 and (current_delay > base_delay or current_max_concurrent < base_max_concurrent):
+                current_delay = max(base_delay, current_delay * 0.7)
+                current_max_concurrent = min(base_max_concurrent, current_max_concurrent + 1)
     
     # Send final report
     await send_final_report(pls_wait, message, total, successful, unsuccessful, blocked, deleted, flood_waits, broadcast_data["type"])
