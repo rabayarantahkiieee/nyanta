@@ -76,6 +76,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `HEROKU_API_KEY`: API key Heroku
 - `UPSTREAM_REPO`: Repository untuk updater
 - `UPSTREAM_BRANCH`: Branch untuk updater (default: master)
+- `SEVALLA_API_KEY`, `SEVALLA_PROJECT_ID`, `SEVALLA_SERVICE_ID`: Diperlukan untuk `/setvar`, `/delvar`, `/getvar`, `/setdb`, `/usage` (ambil dari Sevalla dashboard)
 
 ## 📱 Commands
 
