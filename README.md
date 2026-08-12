@@ -31,6 +31,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Dynamic Content**: Real-time user data replacement di broadcast messages
 - **File Search**: Cari file berdasarkan nama via `/search` atau inline query (`@botusername keyword`) langsung dari chat manapun
 - **Anti-Leech Verification**: Verifikasi 2 langkah dalam bot (tanpa shortlink eksternal) sebelum user bisa ambil file, opsional & bisa diatur admin
+- **Visual Analytics Dashboard**: `/analytics` generate grafik pertumbuhan user, downloads harian, distribusi rank, dan leaderboard sebagai gambar
 - **Multi-Bahasa (ID/EN)**: Pesan inti (alur ambil file, /about, error/limit) bisa diganti ke Bahasa Indonesia atau English via `/language`
 - **Adaptive Broadcast Throttling**: Delay & concurrency broadcast otomatis menyesuaikan saat FloodWait meningkat, lalu kembali normal saat aman
 
@@ -141,6 +142,9 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 ### Anti-Leech Verification (Admin)
 - `/setverify on|off` - Aktifkan/nonaktifkan verifikasi anti-leech
 - `/setverifydelay DETIK` - Atur delay verifikasi (default 10 detik)
+
+### Analytics (Admin)
+- `/analytics` - Dashboard visual (grafik pertumbuhan user, downloads harian, distribusi rank, leaderboard)
 
 ### Heroku Management
 - `/setvar VAR_NAME VAR_VALUE` - Set environment variable
