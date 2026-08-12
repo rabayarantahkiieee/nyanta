@@ -6,7 +6,7 @@ import json
 import os
 
 from bot import Bot
-from config import ADMINS, LOGGER
+from config import LOGGER, admin_filter
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -236,7 +236,7 @@ async def send_custom_message(client, chat_id, msg_type, **kwargs):
         print(f"Error sending custom message {msg_type}: {e}")
         return False
 
-@Bot.on_message(filters.command("addbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("addbutton") & admin_filter)
 async def add_button(client: Bot, message: Message):
     """Tambahkan custom button"""
     if len(message.command) < 3:
@@ -272,7 +272,7 @@ async def add_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("delbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("delbutton") & admin_filter)
 async def del_button(client: Bot, message: Message):
     """Hapus custom button"""
     if len(message.command) != 2:
@@ -302,7 +302,7 @@ async def del_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("getbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getbutton") & admin_filter)
 async def get_button(client: Bot, message: Message):
     """Lihat daftar custom buttons"""
     try:
@@ -329,7 +329,7 @@ async def get_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("limitbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("limitbutton") & admin_filter)
 async def limit_button(client: Bot, message: Message):
     """Enable/disable custom button feature"""
     if len(message.command) != 2:
@@ -362,7 +362,7 @@ async def limit_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("setmsg") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setmsg") & admin_filter)
 async def set_custom_message(client: Bot, message: Message):
     """Set custom message untuk berbagai situasi dengan support media"""
     if len(message.command) < 2:

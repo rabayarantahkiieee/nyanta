@@ -5,7 +5,7 @@
 import asyncio
 
 from bot import Bot
-from config import ADMINS, LOGGER
+from config import LOGGER, admin_filter
 from pyrogram import filters
 from pyrogram.types import Message
 
@@ -22,7 +22,7 @@ from .user_limits import (
 )
 from .stats_utils import make_bar
 
-@Bot.on_message(filters.command("setlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setlimit") & admin_filter)
 async def set_daily_download_limit(client: Bot, message: Message):
     """Set daily download limit for all users"""
     if len(message.command) != 2:
@@ -57,7 +57,7 @@ async def set_daily_download_limit(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("getlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getlimit") & admin_filter)
 async def get_daily_limit(client: Bot, message: Message):
     """Get current daily download limit"""
     try:
@@ -76,7 +76,7 @@ async def get_daily_limit(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("setuserlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setuserlimit") & admin_filter)
 async def set_user_custom_limit_cmd(client: Bot, message: Message):
     """Set custom daily limit for specific user"""
     if len(message.command) != 3:
@@ -114,7 +114,7 @@ async def set_user_custom_limit_cmd(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("deluserlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("deluserlimit") & admin_filter)
 async def delete_user_custom_limit_cmd(client: Bot, message: Message):
     """Delete custom limit for specific user (fallback to global)"""
     if len(message.command) != 2:
@@ -153,7 +153,7 @@ async def delete_user_custom_limit_cmd(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("getuserlimits") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getuserlimits") & admin_filter)
 async def get_user_custom_limits_cmd(client: Bot, message: Message):
     """Get all users with custom limits"""
     try:
@@ -186,7 +186,7 @@ async def get_user_custom_limits_cmd(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("userstats") & filters.user(ADMINS))
+@Bot.on_message(filters.command("userstats") & admin_filter)
 async def get_user_statistics(client: Bot, message: Message):
     """Get user download statistics"""
     msg = await message.reply_text("<code>Mengambil statistik user...</code>", quote=True)
@@ -234,7 +234,7 @@ async def get_user_statistics(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await msg.edit_text(f"❌ <b>Error:</b> `{e}`")
 
-@Bot.on_message(filters.command("resetlimits") & filters.user(ADMINS))
+@Bot.on_message(filters.command("resetlimits") & admin_filter)
 async def reset_user_limits(client: Bot, message: Message):
     """Reset all user daily limits"""
     try:
@@ -276,7 +276,7 @@ async def reset_user_limits(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("checkuser") & filters.user(ADMINS))
+@Bot.on_message(filters.command("checkuser") & admin_filter)
 async def check_user_limit(client: Bot, message: Message):
     """Check specific user limit status"""
     if len(message.command) != 2:

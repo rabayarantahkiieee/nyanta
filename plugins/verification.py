@@ -9,7 +9,7 @@ from pyrogram import filters, StopPropagation
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot import Bot
-from config import ADMINS
+from config import ADMINS, admin_filter
 from database.sql import (
     is_verification_enabled,
     set_verification_enabled,
@@ -131,7 +131,7 @@ async def verification_finish(client: Bot, callback_query: CallbackQuery):
     raise StopPropagation
 
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.command("setverify"))
+@Bot.on_message(filters.private & admin_filter & filters.command("setverify"))
 async def set_verify_command(client: Bot, message: Message):
     if len(message.command) != 2 or message.command[1].lower() not in ("on", "off"):
         await message.reply_text(
@@ -149,7 +149,7 @@ async def set_verify_command(client: Bot, message: Message):
     )
 
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.command("setverifydelay"))
+@Bot.on_message(filters.private & admin_filter & filters.command("setverifydelay"))
 async def set_verify_delay_command(client: Bot, message: Message):
     if len(message.command) != 2 or not message.command[1].isdigit():
         await message.reply_text(

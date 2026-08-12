@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 
 from bot import Bot
-from config import ADMINS, LOGGER, DB_URI
+from config import LOGGER, DB_URI, admin_filter
 from pyrogram import filters
 from pyrogram.types import Message
 from database.sql import User, get_db
@@ -21,7 +21,7 @@ def ensure_backup_dir():
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
 
-@Bot.on_message(filters.command("getdb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getdb") & admin_filter)
 async def get_db_info(client: Bot, message: Message):
     """Informasi database"""
     try:
@@ -45,7 +45,7 @@ async def get_db_info(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("setdb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setdb") & admin_filter)
 async def set_db_config(client: Bot, message: Message):
     """Set the DATABASE_URL environment variable via the Sevalla API"""
     if len(message.command) != 2:
@@ -79,7 +79,7 @@ async def set_db_config(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("backupdb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("backupdb") & admin_filter)
 async def backup_database(client: Bot, message: Message):
     """Backup database - Real user data backup"""
     try:
@@ -151,7 +151,7 @@ async def backup_database(client: Bot, message: Message):
         LOGGER(__name__).error(f"Backup error: {e}")
         await message.reply_text(f"❌ <b>Backup Error:</b> `{str(e)}`", quote=True)
 
-@Bot.on_message(filters.command("restoredb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("restoredb") & admin_filter)
 async def restore_database(client: Bot, message: Message):
     """Restore database dari backup - Real user data restore"""
     if len(message.command) != 2:
@@ -291,7 +291,7 @@ async def restore_database(client: Bot, message: Message):
         LOGGER(__name__).error(f"Restore error: {e}")
         await message.reply_text(f"❌ <b>Restore Error:</b> `{str(e)}`", quote=True)
 
-@Bot.on_message(filters.command("cleardb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("cleardb") & admin_filter)
 async def clear_database(client: Bot, message: Message):
     """Clear database (WARNING: DANGEROUS!)"""
     try:

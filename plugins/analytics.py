@@ -13,7 +13,7 @@ from pyrogram import filters
 from pyrogram.types import Message
 
 from bot import Bot
-from config import ADMINS
+from config import admin_filter
 from database.sql import (
     get_daily_downloads_range,
     get_user_growth_range,
@@ -111,7 +111,7 @@ def render_analytics_chart(bot_name):
     return buf
 
 
-@Bot.on_message(filters.command("analytics") & filters.user(ADMINS))
+@Bot.on_message(filters.command("analytics") & admin_filter)
 async def analytics_command(client: Bot, message: Message):
     """Admin command: render a visual analytics dashboard and send it as a photo."""
     msg = await message.reply_text("<code>📊 Membuat grafik analytics...</code>", quote=True)

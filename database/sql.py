@@ -61,6 +61,12 @@ class User(Base):
 DEFAULT_LANGUAGE = "id"
 SUPPORTED_LANGUAGES = ("id", "en")
 
+class Admin(Base):
+    """Dynamically-added bot admins (on top of the ADMINS env var)."""
+    __tablename__ = "admins"
+
+    user_id = Column(BigInteger, primary_key=True)
+
 class BotSetting(Base):
     """Generic key/value store for global bot configuration."""
     __tablename__ = "bot_settings"
@@ -555,6 +561,50 @@ def get_indonesian_weekday(dt):
 
 DEFAULT_DAILY_LIMIT = 2
 DAILY_LIMIT_SETTING_KEY = "daily_download_limit"
+
+
+def get_all_admin_ids():
+    """Get all dynamically-added admin user IDs (on top of the ADMINS env var)."""
+    db = get_db()
+    try:
+        return [r.user_id for r in db.query(Admin).all()]
+    except Exception as e:
+        print(f"Get all admin ids error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def add_admin_db(user_id):
+    db = get_db()
+    try:
+        if not db.query(Admin).filter(Admin.user_id == user_id).first():
+            db.add(Admin(user_id=user_id))
+            db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add admin error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def remove_admin_db(user_id):
+    db = get_db()
+    try:
+        row = db.query(Admin).filter(Admin.user_id == user_id).first()
+        if row:
+            db.delete(row)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Remove admin error: {e}")
+        return False
+    finally:
+        db.close()
 
 
 def get_setting(key, default=None):

@@ -8,7 +8,7 @@ from pyrogram import filters
 from pyrogram.types import Message
 
 from bot import Bot
-from config import ADMINS, LOGGER
+from config import LOGGER, admin_filter
 
 # Sevalla API Configuration
 SEVALLA_API_KEY = os.environ.get("SEVALLA_API_KEY")
@@ -46,7 +46,7 @@ def sevalla_api_call(method, endpoint, data=None):
         return {"error": str(e)}
 
 
-@Bot.on_message(filters.command("setvar") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setvar") & admin_filter)
 async def setvar(client: Bot, message: Message):
     if len(message.command) < 3:
         await message.reply_text("❌ <b>Penggunaan:</b> /setvar KEY VALUE", quote=True)
@@ -69,7 +69,7 @@ async def setvar(client: Bot, message: Message):
         )
 
 
-@Bot.on_message(filters.command("delvar") & filters.user(ADMINS))
+@Bot.on_message(filters.command("delvar") & admin_filter)
 async def delvar(client: Bot, message: Message):
     if len(message.command) != 2:
         await message.reply_text("❌ <b>Penggunaan:</b> /delvar KEY", quote=True)
@@ -90,7 +90,7 @@ async def delvar(client: Bot, message: Message):
         )
 
 
-@Bot.on_message(filters.command("getvar") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getvar") & admin_filter)
 async def getvar(client: Bot, message: Message):
     if len(message.command) > 1:
         key = message.command[1]
@@ -126,7 +126,7 @@ async def getvar(client: Bot, message: Message):
             )
 
 
-@Bot.on_message(filters.command("usage") & filters.user(ADMINS))
+@Bot.on_message(filters.command("usage") & admin_filter)
 async def usage(client: Bot, message: Message):
     await message.reply_text(
         "📊 <b>SEVALLA APP MONITORING</b>\n\n"

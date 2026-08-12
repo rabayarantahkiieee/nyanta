@@ -9,7 +9,7 @@ from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot import Bot
-from config import ADMINS, CHANNEL_ID, DISABLE_CHANNEL_BUTTON, LOGGER
+from config import CHANNEL_ID, DISABLE_CHANNEL_BUTTON, LOGGER, admin_filter
 from config import encode
 from database.sql import add_file_to_index
 
@@ -61,7 +61,7 @@ def index_message_file(message: Message, indexed_message_id):
         LOGGER(__name__).warning(f"Failed to index file {indexed_message_id}: {e}")
 
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.forwarded)
+@Bot.on_message(filters.private & admin_filter & filters.forwarded)
 async def handle_forwarded_payment_proof(client: Bot, message: Message):
     """Handle forwarded payment proof from admin to upgrade user limit"""
     try:
@@ -108,7 +108,7 @@ async def handle_forwarded_payment_proof(client: Bot, message: Message):
 
 @Bot.on_message(
     filters.private
-    & filters.user(ADMINS)
+    & admin_filter
     & ~filters.forwarded
     & ~filters.command(
         [

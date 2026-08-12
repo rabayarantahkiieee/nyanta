@@ -19,6 +19,7 @@ from config import (
     FORCE_MSG,
     PROTECT_CONTENT,
     START_MSG,
+    admin_filter,
 )
 from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info, record_user_download, get_daily_downloads_range, get_top_users_by_activity, get_rank_info
 from pyrogram import filters
@@ -674,7 +675,7 @@ async def not_joined(client: Bot, message: Message):
     )
 
 
-@Bot.on_message(filters.command("users") & filters.user(ADMINS))
+@Bot.on_message(filters.command("users") & admin_filter)
 async def get_users(client: Bot, message: Message):
     msg = await client.send_message(
         chat_id=message.chat.id, text="<code>Processing ...</code>"
@@ -718,7 +719,7 @@ async def get_users(client: Bot, message: Message):
     await msg.edit(stats_text)
 
 
-@Bot.on_message(filters.command("broadcast") & filters.user(ADMINS))
+@Bot.on_message(filters.command("broadcast") & admin_filter)
 async def send_text(client: Bot, message: Message):
     """
     Enhanced broadcast function with batch processing, concurrency control, and comprehensive error handling.

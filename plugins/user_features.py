@@ -8,7 +8,7 @@ from datetime import datetime
 from pyrogram import filters
 
 from bot import Bot
-from config import ADMINS
+from config import admin_filter
 from database.sql import (
     full_userbase,
     get_user_stats as get_db_user_stats,
@@ -294,7 +294,7 @@ async def user_tutorial(client, message):
 
 
 # Admin command to view user feedback
-@Bot.on_message(filters.command("viewfeedback") & filters.user(ADMINS))
+@Bot.on_message(filters.command("viewfeedback") & admin_filter)
 async def view_feedback(client, message):
     """Admin command to view user feedback"""
     try:
@@ -318,7 +318,7 @@ async def view_feedback(client, message):
 
 
 # Admin command to view user reports
-@Bot.on_message(filters.command("viewreports") & filters.user(ADMINS))
+@Bot.on_message(filters.command("viewreports") & admin_filter)
 async def view_reports(client, message):
     """Admin command to view user reports"""
     try:
