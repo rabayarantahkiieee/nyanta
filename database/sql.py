@@ -2,6 +2,7 @@
 # Recode by @yawrenmaru
 # Developed By Soxmed
 
+import json
 import os
 import threading
 from datetime import datetime, timedelta, timezone
@@ -88,6 +89,38 @@ class UserVerification(Base):
 
     user_id = Column(BigInteger, primary_key=True)
     verified_until = Column(DateTime(timezone=True), nullable=False)
+
+class CustomButton(Base):
+    """Admin-configured buttons shown alongside delivered files."""
+    __tablename__ = "custom_buttons"
+
+    button_id = Column(String(32), primary_key=True)
+    text = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+
+class CustomMessage(Base):
+    """Admin-configured messages for situations like welcome/error/limit/protected."""
+    __tablename__ = "custom_messages"
+
+    msg_type = Column(String(32), primary_key=True)
+    content_type = Column(String(20), default="text", nullable=False)
+    content = Column(String, nullable=True)
+    media_id = Column(String, nullable=True)
+    media_type = Column(String(20), nullable=True)
+    buttons_json = Column(String, nullable=True)
+
+class ProtectedFile(Base):
+    """Files flagged as protected via /addkonten."""
+    __tablename__ = "protected_files"
+
+    message_id = Column(BigInteger, primary_key=True)
+
+class ContentDownloadLimit(Base):
+    """Per-file remaining download count, set independently via /limitkonten."""
+    __tablename__ = "content_download_limits"
+
+    message_id = Column(BigInteger, primary_key=True)
+    download_limit = Column(Integer, nullable=False)
 
 class FileIndex(Base):
     """Searchable index of files stored in the database channel."""
@@ -853,6 +886,297 @@ def set_user_language(user_id, language):
     except Exception as e:
         db.rollback()
         print(f"Set user language error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+# =============================================================================
+# CUSTOM BUTTONS
+# =============================================================================
+
+def get_all_custom_buttons():
+    """Get all custom buttons as {button_id: {"text":..., "url":...}}."""
+    db = get_db()
+    try:
+        rows = db.query(CustomButton).all()
+        return {r.button_id: {"text": r.text, "url": r.url} for r in rows}
+    except Exception as e:
+        print(f"Get all custom buttons error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+def sync_custom_buttons(buttons):
+    """Replace all custom buttons with the given {button_id: {"text","url"}} dict."""
+    db = get_db()
+    try:
+        existing = {r.button_id: r for r in db.query(CustomButton).all()}
+        for button_id, row in list(existing.items()):
+            if button_id not in buttons:
+                db.delete(row)
+        for button_id, data in buttons.items():
+            if button_id in existing:
+                existing[button_id].text = data.get("text", "")
+                existing[button_id].url = data.get("url", "")
+            else:
+                db.add(CustomButton(button_id=button_id, text=data.get("text", ""), url=data.get("url", "")))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Sync custom buttons error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+DEFAULT_BUTTONS_ENABLED_KEY = "default_buttons_enabled"
+
+
+def get_default_buttons_enabled():
+    """Whether the channel's own file buttons are shown alongside custom ones."""
+    return get_setting(DEFAULT_BUTTONS_ENABLED_KEY, "1") == "1"
+
+
+def set_default_buttons_enabled(enabled):
+    return set_setting(DEFAULT_BUTTONS_ENABLED_KEY, "1" if enabled else "0")
+
+
+# =============================================================================
+# CUSTOM MESSAGES
+# =============================================================================
+
+def _custom_message_row_to_dict(row):
+    return {
+        "type": row.content_type,
+        "content": row.content or "",
+        "media_id": row.media_id,
+        "media_type": row.media_type,
+        "buttons": json.loads(row.buttons_json) if row.buttons_json else [],
+    }
+
+
+def get_custom_message_db(msg_type):
+    """Get one custom message's data, or None if not configured."""
+    db = get_db()
+    try:
+        row = db.query(CustomMessage).filter(CustomMessage.msg_type == msg_type).first()
+        return _custom_message_row_to_dict(row) if row else None
+    except Exception as e:
+        print(f"Get custom message error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def set_custom_message_db(msg_type, data):
+    """Set/replace one custom message's data."""
+    db = get_db()
+    try:
+        row = db.query(CustomMessage).filter(CustomMessage.msg_type == msg_type).first()
+        content_type = data.get("type", "text")
+        content = data.get("content", "")
+        media_id = data.get("media_id")
+        media_type = data.get("media_type")
+        buttons_json = json.dumps(data.get("buttons", []))
+        if row:
+            row.content_type = content_type
+            row.content = content
+            row.media_id = media_id
+            row.media_type = media_type
+            row.buttons_json = buttons_json
+        else:
+            db.add(CustomMessage(
+                msg_type=msg_type,
+                content_type=content_type,
+                content=content,
+                media_id=media_id,
+                media_type=media_type,
+                buttons_json=buttons_json,
+            ))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set custom message error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_custom_messages():
+    """Get all custom messages as {msg_type: message_data_dict}."""
+    db = get_db()
+    try:
+        rows = db.query(CustomMessage).all()
+        return {r.msg_type: _custom_message_row_to_dict(r) for r in rows}
+    except Exception as e:
+        print(f"Get all custom messages error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+# =============================================================================
+# CONTENT PROTECTION
+# =============================================================================
+
+def is_file_protected(message_id):
+    """Whether a file (by db-channel message id) is flagged as protected."""
+    db = get_db()
+    try:
+        return db.query(ProtectedFile).filter(ProtectedFile.message_id == message_id).first() is not None
+    except Exception as e:
+        print(f"Is file protected error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def add_protected_file_db(message_id):
+    db = get_db()
+    try:
+        exists = db.query(ProtectedFile).filter(ProtectedFile.message_id == message_id).first()
+        if not exists:
+            db.add(ProtectedFile(message_id=message_id))
+            db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add protected file error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def remove_protected_file_db(message_id):
+    db = get_db()
+    try:
+        row = db.query(ProtectedFile).filter(ProtectedFile.message_id == message_id).first()
+        if row:
+            db.delete(row)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Remove protected file error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_protected_message_ids():
+    db = get_db()
+    try:
+        return [r.message_id for r in db.query(ProtectedFile).all()]
+    except Exception as e:
+        print(f"Get all protected message ids error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def sync_protected_files(message_ids):
+    """Replace the protected-files set with the given iterable of ids."""
+    db = get_db()
+    try:
+        target_ids = {int(mid) for mid in message_ids}
+        existing = {r.message_id: r for r in db.query(ProtectedFile).all()}
+        for mid, row in list(existing.items()):
+            if mid not in target_ids:
+                db.delete(row)
+        for mid in target_ids:
+            if mid not in existing:
+                db.add(ProtectedFile(message_id=mid))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Sync protected files error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def set_content_limit_db(message_id, limit):
+    """Set the remaining download count for a file, independent of protected status."""
+    db = get_db()
+    try:
+        row = db.query(ContentDownloadLimit).filter(ContentDownloadLimit.message_id == message_id).first()
+        if row:
+            row.download_limit = limit
+        else:
+            db.add(ContentDownloadLimit(message_id=message_id, download_limit=limit))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set content limit error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def try_consume_content_limit(message_id):
+    """
+    Atomically check-and-decrement a file's remaining download count.
+    Returns (allowed, remaining): remaining is None when no limit is configured
+    for this file (so the caller should treat it as unlimited).
+    """
+    db = get_db()
+    try:
+        row = db.query(ContentDownloadLimit).filter(ContentDownloadLimit.message_id == message_id).first()
+        if not row:
+            return True, None
+        if row.download_limit <= 0:
+            return False, 0
+        row.download_limit -= 1
+        remaining = row.download_limit
+        db.commit()
+        return True, remaining
+    except Exception as e:
+        db.rollback()
+        print(f"Try consume content limit error: {e}")
+        return True, None
+    finally:
+        db.close()
+
+
+def get_all_content_limits():
+    """Get all configured per-file limits as {message_id: remaining_limit}."""
+    db = get_db()
+    try:
+        rows = db.query(ContentDownloadLimit).all()
+        return {r.message_id: r.download_limit for r in rows}
+    except Exception as e:
+        print(f"Get all content limits error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+def sync_content_limits(limits_by_id):
+    """Replace all per-file limits with the given {message_id: limit} dict."""
+    db = get_db()
+    try:
+        target = {int(mid): limit for mid, limit in limits_by_id.items()}
+        existing = {r.message_id: r for r in db.query(ContentDownloadLimit).all()}
+        for mid, row in list(existing.items()):
+            if mid not in target:
+                db.delete(row)
+        for mid, limit in target.items():
+            if mid in existing:
+                existing[mid].download_limit = limit
+            else:
+                db.add(ContentDownloadLimit(message_id=mid, download_limit=limit))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Sync content limits error: {e}")
         return False
     finally:
         db.close()

@@ -10,42 +10,72 @@ from config import ADMINS, LOGGER
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 
-BUTTON_FILE = "button_settings.json"
+from database.sql import (
+    get_all_custom_buttons,
+    sync_custom_buttons,
+    get_default_buttons_enabled,
+    set_default_buttons_enabled,
+    get_custom_message_db,
+    set_custom_message_db,
+    get_all_custom_messages,
+)
+
+# Custom buttons, custom messages and their enable/disable flag are stored in
+# the database (see database/sql.py) so they survive redeploys, instead of a
+# local button_settings.json file.
+LEGACY_BUTTON_FILE = "button_settings.json"
+
+
+def _migrate_legacy_json_if_needed():
+    """One-time import of data from the old button_settings.json into the database."""
+    if not os.path.exists(LEGACY_BUTTON_FILE):
+        return
+    try:
+        with open(LEGACY_BUTTON_FILE, "r") as f:
+            legacy = json.load(f)
+
+        sync_custom_buttons(legacy.get("custom_buttons", {}))
+        set_default_buttons_enabled(legacy.get("default_buttons", True))
+
+        for msg_type, message_data in legacy.get("custom_messages", {}).items():
+            # Old format allowed a plain string for a text-only message
+            if isinstance(message_data, str):
+                message_data = {
+                    "type": "text",
+                    "content": message_data,
+                    "media_id": None,
+                    "media_type": None,
+                    "buttons": [],
+                }
+            set_custom_message_db(msg_type, message_data)
+
+        os.rename(LEGACY_BUTTON_FILE, LEGACY_BUTTON_FILE + ".migrated")
+        print("[INFO] Migrated button_settings.json into the database")
+    except Exception as e:
+        print(f"[WARNING] Failed to migrate legacy button_settings.json: {e}")
+
+
+_migrate_legacy_json_if_needed()
+
 
 def load_button_settings():
-    """Load button settings from file"""
-    if os.path.exists(BUTTON_FILE):
-        with open(BUTTON_FILE, 'r') as f:
-            return json.load(f)
+    """Load button settings from the database, shaped like the old JSON file."""
     return {
-        "custom_buttons": {},
-        "default_buttons": True,
-        "custom_messages": {}
+        "custom_buttons": get_all_custom_buttons(),
+        "default_buttons": get_default_buttons_enabled(),
+        "custom_messages": get_all_custom_messages(),
     }
 
 def save_button_settings(settings):
-    """Save button settings to file"""
-    with open(BUTTON_FILE, 'w') as f:
-        json.dump(settings, f, indent=2)
+    """Persist a full settings dict (as produced by load_button_settings) to the database."""
+    sync_custom_buttons(settings.get("custom_buttons", {}))
+    set_default_buttons_enabled(settings.get("default_buttons", True))
+    for msg_type, data in settings.get("custom_messages", {}).items():
+        set_custom_message_db(msg_type, data)
 
 def get_custom_message(msg_type):
     """Get custom message with media support"""
-    settings = load_button_settings()
-    message_data = settings.get("custom_messages", {}).get(msg_type)
-
-    if not message_data:
-        return None
-
-    # Backward compatibility: if it's a string, convert to dict format
-    if isinstance(message_data, str):
-        return {
-            "type": "text",
-            "content": message_data,
-            "media_id": None,
-            "media_type": None
-        }
-
-    return message_data
+    return get_custom_message_db(msg_type)
 
 async def send_custom_message(client, chat_id, msg_type, **kwargs):
     """Send custom message with media support"""
