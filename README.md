@@ -23,6 +23,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Data Persistence**: Data user tersimpan aman meski redeploy
 - **Database Backup/Restore**: Backup & restore database lengkap dengan data user
 - **Persistent Button & Content Settings**: Custom button, custom message, protected content, dan limit konten tersimpan di database (bukan file lokal) sehingga aman dari redeploy
+- **Persistent Profile & Feedback**: Statistik profil, feedback, dan laporan user tersimpan di database (bukan file lokal) sehingga aman dari redeploy
 - **Media Broadcasting**: Support broadcast dengan media (photo/video/document)
 - **Rich Message Formatting**: HTML formatting support di broadcast & custom messages
 - **Enhanced /setmsg**: Support media attachments untuk custom messages

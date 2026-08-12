@@ -20,7 +20,7 @@ from config import (
     PROTECT_CONTENT,
     START_MSG,
 )
-from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info
+from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info, record_user_download
 from pyrogram import filters
 from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked
@@ -425,12 +425,6 @@ try:
 except ImportError:
     BUTTONS_AVAILABLE = False
 
-try:
-    from .user_features import update_user_activity, save_user_data, load_user_data
-    USER_TRACKING_AVAILABLE = True
-except ImportError:
-    USER_TRACKING_AVAILABLE = False
-
 def get_custom_buttons():
     """Get custom buttons for download"""
     if not BUTTONS_AVAILABLE:
@@ -465,22 +459,9 @@ def get_custom_buttons():
         return []
 
 def update_user_tracking(user_id):
-    """Update user activity and stats"""
-    if not USER_TRACKING_AVAILABLE:
-        return
-    
+    """Update user profile stats (total downloads, activity score, streak) for a successful download."""
     try:
-        user_data = load_user_data()
-        update_user_activity(user_id, user_data)
-        
-        # Update activity score and downloads
-        user_stats = user_data.get(str(user_id), {})
-        user_stats['total_downloads'] = user_stats.get('total_downloads', 0) + 1
-        user_stats['downloads_today'] = user_stats.get('downloads_today', 0) + 1
-        user_stats['activity_score'] = user_stats.get('activity_score', 0) + 10
-        
-        user_data[str(user_id)] = user_stats
-        save_user_data(user_data)
+        record_user_download(user_id)
     except Exception as e:
         print(f"Error updating user tracking: {e}")
 

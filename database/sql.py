@@ -115,6 +115,39 @@ class ProtectedFile(Base):
 
     message_id = Column(BigInteger, primary_key=True)
 
+class UserProfileStats(Base):
+    """Cumulative /profile stats: total downloads, activity score, daily streak."""
+    __tablename__ = "user_profile_stats"
+
+    user_id = Column(BigInteger, primary_key=True)
+    total_downloads = Column(Integer, default=0, nullable=False)
+    activity_score = Column(Integer, default=0, nullable=False)
+    streak_days = Column(Integer, default=1, nullable=False)
+    last_active_date = Column(String(10), nullable=True)
+
+class UserFeedback(Base):
+    """Messages submitted via /feedback."""
+    __tablename__ = "user_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    username = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    message = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class UserReport(Base):
+    """Issues submitted via /report."""
+    __tablename__ = "user_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    username = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    issue = Column(String, nullable=False)
+    status = Column(String(20), default="pending", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class ContentDownloadLimit(Base):
     """Per-file remaining download count, set independently via /limitkonten."""
     __tablename__ = "content_download_limits"
@@ -1178,6 +1211,206 @@ def sync_content_limits(limits_by_id):
         db.rollback()
         print(f"Sync content limits error: {e}")
         return False
+    finally:
+        db.close()
+
+
+# =============================================================================
+# USER PROFILE STATS
+# =============================================================================
+
+def get_user_profile_stats(user_id):
+    """Get a user's cumulative profile stats (defaults if never recorded)."""
+    db = get_db()
+    try:
+        row = db.query(UserProfileStats).filter(UserProfileStats.user_id == user_id).first()
+        if not row:
+            return {"total_downloads": 0, "activity_score": 0, "streak_days": 0}
+        return {
+            "total_downloads": row.total_downloads,
+            "activity_score": row.activity_score,
+            "streak_days": row.streak_days,
+        }
+    except Exception as e:
+        print(f"Get user profile stats error: {e}")
+        return {"total_downloads": 0, "activity_score": 0, "streak_days": 0}
+    finally:
+        db.close()
+
+
+def record_user_download(user_id):
+    """Atomically bump a user's download/activity stats and daily streak."""
+    db = get_db()
+    try:
+        today = datetime.now().date().isoformat()
+        row = db.query(UserProfileStats).filter(UserProfileStats.user_id == user_id).first()
+        if not row:
+            row = UserProfileStats(
+                user_id=user_id, total_downloads=0, activity_score=0,
+                streak_days=1, last_active_date=today,
+            )
+            db.add(row)
+
+        if row.last_active_date != today:
+            try:
+                last_date = datetime.fromisoformat(row.last_active_date).date() if row.last_active_date else None
+            except ValueError:
+                last_date = None
+            today_date = datetime.now().date()
+            if last_date and (today_date - last_date).days == 1:
+                row.streak_days += 1
+            elif not last_date or (today_date - last_date).days > 1:
+                row.streak_days = 1
+            row.last_active_date = today
+
+        row.total_downloads += 1
+        row.activity_score += 10
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Record user download error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def set_user_profile_stats(user_id, total_downloads=0, activity_score=0, streak_days=1, last_active_date=None):
+    """Directly set a user's profile stats (used for one-time legacy data import)."""
+    db = get_db()
+    try:
+        row = db.query(UserProfileStats).filter(UserProfileStats.user_id == user_id).first()
+        if row:
+            row.total_downloads = total_downloads
+            row.activity_score = activity_score
+            row.streak_days = streak_days
+            row.last_active_date = last_active_date
+        else:
+            db.add(UserProfileStats(
+                user_id=user_id, total_downloads=total_downloads, activity_score=activity_score,
+                streak_days=streak_days, last_active_date=last_active_date,
+            ))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set user profile stats error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_user_rank_position(user_id):
+    """Get a user's 1-based rank by activity_score, or None if they have no stats yet."""
+    db = get_db()
+    try:
+        rows = db.query(UserProfileStats).order_by(UserProfileStats.activity_score.desc()).all()
+        for i, row in enumerate(rows, 1):
+            if row.user_id == user_id:
+                return i
+        return None
+    except Exception as e:
+        print(f"Get user rank position error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+# =============================================================================
+# FEEDBACK & REPORTS
+# =============================================================================
+
+def add_feedback(user_id, username, name, message):
+    db = get_db()
+    try:
+        db.add(UserFeedback(user_id=user_id, username=username, name=name, message=message))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add feedback error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_recent_feedback(limit=5):
+    db = get_db()
+    try:
+        rows = db.query(UserFeedback).order_by(UserFeedback.id.desc()).limit(limit).all()
+        return [
+            {
+                "user_id": r.user_id, "username": r.username, "name": r.name,
+                "message": r.message, "created_at": r.created_at,
+            }
+            for r in reversed(rows)
+        ]
+    except Exception as e:
+        print(f"Get recent feedback error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_feedback_count():
+    db = get_db()
+    try:
+        return db.query(UserFeedback).count()
+    except Exception as e:
+        print(f"Get feedback count error: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+def add_report(user_id, username, name, issue):
+    db = get_db()
+    try:
+        db.add(UserReport(user_id=user_id, username=username, name=name, issue=issue, status="pending"))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add report error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_pending_reports(limit=5):
+    db = get_db()
+    try:
+        rows = (
+            db.query(UserReport)
+            .filter(UserReport.status == "pending")
+            .order_by(UserReport.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "user_id": r.user_id, "username": r.username, "name": r.name,
+                "issue": r.issue, "created_at": r.created_at,
+            }
+            for r in reversed(rows)
+        ]
+    except Exception as e:
+        print(f"Get pending reports error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_report_counts():
+    """Returns (pending_count, total_count)."""
+    db = get_db()
+    try:
+        total = db.query(UserReport).count()
+        pending = db.query(UserReport).filter(UserReport.status == "pending").count()
+        return pending, total
+    except Exception as e:
+        print(f"Get report counts error: {e}")
+        return 0, 0
     finally:
         db.close()
 
