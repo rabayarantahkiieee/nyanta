@@ -8,6 +8,8 @@ import os
 from bot import Bot
 from config import LOGGER, admin_filter
 from pyrogram import filters
+from pyrogram.parser import Parser
+from pyrogram.types import MessageEntity as _MessageEntity
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 
 from database.sql import (
@@ -362,6 +364,40 @@ async def limit_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
+def extract_html_after_prefix(message: Message, prefix: str) -> str:
+    """
+    Return the HTML-formatted remainder of message.text after `prefix`,
+    preserving whatever bold/italic/blockquote/etc. formatting the admin
+    actually applied (or pasted) - no manual <b>/<i> tags required.
+
+    Telegram stores formatting as a list of entities (offset/length in the
+    message text), separate from the plain text itself. message.text.html
+    only renders the *whole* message, so to get just "everything after the
+    command", the entities need their offsets shifted left by the prefix
+    length (and trimmed/dropped if they started inside the prefix) before
+    handing them to Pyrogram's own HTML renderer.
+    """
+    full_text = message.text
+    prefix_len = len(prefix)
+    entities = full_text.entities or []
+
+    adjusted = []
+    for e in entities:
+        new_offset = e.offset - prefix_len
+        new_length = e.length
+        if new_offset < 0:
+            new_length += new_offset
+            new_offset = 0
+        if new_length <= 0:
+            continue
+        adjusted.append(_MessageEntity(
+            type=e.type, offset=new_offset, length=new_length,
+            url=e.url, user=e.user, language=e.language, custom_emoji_id=e.custom_emoji_id,
+        ))
+
+    return Parser.unparse(str(full_text)[prefix_len:], adjusted, True)
+
+
 @Bot.on_message(filters.command("setmsg") & admin_filter)
 async def set_custom_message(client: Bot, message: Message):
     """Set custom message untuk berbagai situasi dengan support media"""
@@ -400,25 +436,25 @@ async def set_custom_message(client: Bot, message: Message):
                 msg_data["type"] = "photo"
                 msg_data["media_id"] = replied.photo.file_id
                 msg_data["media_type"] = "photo"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.video:
                 msg_data["type"] = "video"
                 msg_data["media_id"] = replied.video.file_id
                 msg_data["media_type"] = "video"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.document:
                 msg_data["type"] = "document"
                 msg_data["media_id"] = replied.document.file_id
                 msg_data["media_type"] = "document"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.audio:
                 msg_data["type"] = "audio"
                 msg_data["media_id"] = replied.audio.file_id
                 msg_data["media_type"] = "audio"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.text:
                 msg_data["type"] = "text"
-                msg_data["content"] = replied.text
+                msg_data["content"] = replied.text.html
             else:
                 await message.reply_text("❌ <b>Tipe media tidak didukung!</b>\n\n<b>Supported:</b> Text, Photo, Video, Document, Audio", quote=True)
                 return
@@ -489,8 +525,11 @@ async def set_custom_message(client: Bot, message: Message):
                 await message.reply_text("❌ <b>Harus ada MESSAGE_TEXT atau reply ke pesan/media!</b>", quote=True)
                 return
             msg_data["type"] = "text"
-            msg_data["content"] = " ".join(message.command[2:])
-            
+            raw_text = str(message.text)
+            rest = raw_text.split(None, 2)[2]
+            prefix = raw_text[:len(raw_text) - len(rest)]
+            msg_data["content"] = extract_html_after_prefix(message, prefix)
+
             # Parse buttons from content if they exist
             # Format: [Button Text](Button URL) && [Button Text](Button URL)
             import re

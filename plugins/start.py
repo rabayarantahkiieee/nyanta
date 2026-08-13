@@ -281,32 +281,32 @@ async def get_broadcast_message_type(broadcast_msg):
     if broadcast_msg.photo:
         broadcast_data["type"] = "photo"
         broadcast_data["media_id"] = broadcast_msg.photo.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.video:
         broadcast_data["type"] = "video"
         broadcast_data["media_id"] = broadcast_msg.video.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.document:
         broadcast_data["type"] = "document"
         broadcast_data["media_id"] = broadcast_msg.document.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.audio:
         broadcast_data["type"] = "audio"
         broadcast_data["media_id"] = broadcast_msg.audio.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.voice:
         broadcast_data["type"] = "voice"
         broadcast_data["media_id"] = broadcast_msg.voice.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.animation:
         broadcast_data["type"] = "animation"
         broadcast_data["media_id"] = broadcast_msg.animation.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.sticker:
         broadcast_data["type"] = "sticker"
@@ -318,7 +318,7 @@ async def get_broadcast_message_type(broadcast_msg):
 
     elif broadcast_msg.text is not None:
         broadcast_data["type"] = "text"
-        broadcast_data["content"] = broadcast_msg.text
+        broadcast_data["content"] = broadcast_msg.text.html
 
     else:
         return None  # Unsupported type
@@ -739,7 +739,8 @@ async def send_text(client: Bot, message: Message):
             msg = await message.reply(
                 "<code>❌ Gunakan perintah ini dengan reply ke pesan yang ingin di-broadcast!</code>\n\n"
                 "<b>📱 Supported Media:</b> Text, Photo, Video, Document, Audio, Voice, Animation, Sticker, Video Note\n"
-                "<b>🎨 HTML Support:</b> <code><b></code>, <code><i></code>, <code><blockquote></code>, <code>\\n</code>\n"
+                "<b>🎨 Formatting:</b> Bold/italic/blockquote/dll otomatis kepakai persis kayak pesan yang di-reply "
+                "(gak perlu ngetik tag <code><b></code>/<code><i></code> manual) — cukup format teksnya di Telegram lalu reply pesannya\n"
                 "<b>🔘 Button Markup:</b> <code>[Button Text](Button URL)</code>\n"
                 "<code>[Btn1](URL1) && [Btn2](URL2)</code> untuk 2 buttons per row\n"
                 "<b>📊 Placeholder Variables:</b>\n"

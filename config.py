@@ -169,12 +169,14 @@ class Data:
  ├ /help - Bantuan Perintah Bot ini
  ├ /id - Lihat informasi profile lengkap
  ├ /profile - Lihat profil & statistik pengguna
+ ├ /stats - Lihat statistik ringkas bot
  ├ /ping - Untuk mengecek bot hidup
  ├ /uptime - Untuk melihat status bot
+ ├ /search - Cari file berdasarkan nama (juga via <code>@botusername keyword</code>)
+ ├ /language - Ganti bahasa pesan inti (ID/EN)
  ├ /feedback - Kirim feedback ke developer
  ├ /report - Laporkan masalah atau bug
- ├ /tutorial - Panduan lengkap penggunaan bot
- ├ /stats - Lihat statistik bot (alias /users)
+ └ /tutorial - Panduan lengkap penggunaan bot
 
 <b> ❏ Perintah Untuk Admin BOT</b>
  ├ <b>📁 File Management</b>
@@ -188,29 +190,25 @@ class Data:
  ├
  ├ <b>💾 Database Management</b>
  ├ /getdb - Informasi database
- ├ /setdb - Set database configuration
+ ├ /setdb - Set DATABASE_URL via Sevalla
  ├ /backupdb - Backup database
  ├ /restoredb - Restore database dari backup
- ├ /cleardb - Clear database (DANGER!)
+ ├ /cleardb - Kosongkan data user (DANGER!)
  ├
  ├ <b>⚙️ System Management</b>
  ├ /logs - Untuk melihat logs bot
  ├ /vars - Lihat semua config variables
  ├ /info - Informasi lengkap bot & statistik
  ├ /speedtest - Test kecepatan server
- ├ /users - Statistik pengguna bot
+ ├ /users - Statistik pengguna bot (detail)
+ ├ /analytics - Dashboard analytics visual (grafik)
  ├ /broadcast - Kirim pesan broadcast
  ├
- ├ <b>🔄 Bot Management</b>
- ├ /update - Update bot dari GitHub
- ├ /restart - Restart bot
- ├ /pull - Pull update tanpa restart
- ├
- ├ <b>🌐 Heroku Management</b>
+ ├ <b>🌐 Sevalla/Heroku Management</b>
  ├ /setvar - Set environment variables
  ├ /delvar - Hapus environment variables
  ├ /getvar - Lihat environment variables
- └ /usage - Monitoring aplikasi Heroku
+ └ /usage - Monitoring aplikasi Sevalla
 
 <b> ❏ Content & Button Management (Admin)</b>
  ├ /addbutton - Tambahkan custom button
@@ -222,6 +220,20 @@ class Data:
  ├ /delkonten - Hapus file dari protected list
  ├ /getkonten - Lihat daftar protected content
  └ /limitkonten - Set limit untuk konten tertentu
+
+<b> ❏ User Limit Management (Admin)</b>
+ ├ /setlimit - Set limit download harian global (0 = nonaktifkan)
+ ├ /getlimit - Lihat limit harian saat ini
+ ├ /setuserlimit - Set limit custom per user (0 = blokir user ini)
+ ├ /deluserlimit - Hapus limit custom user
+ ├ /getuserlimits - Lihat semua custom limit
+ ├ /userstats - Statistik download semua user
+ ├ /resetlimits - Reset semua limit user
+ └ /checkuser - Cek status limit user tertentu
+
+<b> ❏ Anti-Leech Verification (Admin)</b>
+ ├ /setverify - Aktifkan/nonaktifkan verifikasi anti-leech
+ └ /setverifydelay - Atur delay verifikasi (detik)
 
 <b> ❏ Admin Feedback Management</b>
  ├ /viewfeedback - Lihat feedback dari pengguna

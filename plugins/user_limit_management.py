@@ -28,16 +28,17 @@ async def set_daily_download_limit(client: Bot, message: Message):
     if len(message.command) != 2:
         await message.reply_text(
             "❌ <b>Penggunaan:</b> /setlimit JUMLAH\n\n"
-            "<b>Contoh:</b> /setlimit 5\n\n"
+            "<b>Contoh:</b> /setlimit 5\n"
+            "<b>Untuk nonaktifkan download:</b> /setlimit 0\n\n"
             f"<b>Limit saat ini:</b> {get_daily_limit_config()} kali per hari",
             quote=True
         )
         return
-    
+
     try:
         new_limit = int(message.command[1])
-        if new_limit < 1 or new_limit > 50:
-            await message.reply_text("❌ <b>Limit harus antara 1-50!</b>", quote=True)
+        if new_limit < 0 or new_limit > 50:
+            await message.reply_text("❌ <b>Limit harus antara 0-50! (0 = nonaktifkan download)</b>", quote=True)
             return
         
         old_limit = get_daily_limit_config()
@@ -83,7 +84,8 @@ async def set_user_custom_limit_cmd(client: Bot, message: Message):
         await message.reply_text(
             "❌ <b>Penggunaan:</b> /setuserlimit USER_ID LIMIT\n\n"
             "<b>Contoh:</b> /setuserlimit 123456789 10\n"
-            "<b>Untuk unlimited:</b> /setuserlimit 123456789 999",
+            "<b>Untuk unlimited:</b> /setuserlimit 123456789 999\n"
+            "<b>Untuk blokir user ini:</b> /setuserlimit 123456789 0",
             quote=True
         )
         return
@@ -92,8 +94,8 @@ async def set_user_custom_limit_cmd(client: Bot, message: Message):
         user_id = int(message.command[1])
         new_limit = int(message.command[2])
 
-        if new_limit < 1 or new_limit > 1000:
-            await message.reply_text("❌ <b>Limit harus antara 1-1000!</b>", quote=True)
+        if new_limit < 0 or new_limit > 1000:
+            await message.reply_text("❌ <b>Limit harus antara 0-1000! (0 = blokir user ini)</b>", quote=True)
             return
 
         old_limit = get_user_custom_limit(user_id)

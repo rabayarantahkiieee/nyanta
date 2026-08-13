@@ -24,7 +24,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Persistent Button & Content Settings**: Custom button, custom message, protected content, dan limit konten tersimpan di database (bukan file lokal) sehingga aman dari redeploy
 - **Persistent Profile & Feedback**: Statistik profil, feedback, dan laporan user tersimpan di database (bukan file lokal) sehingga aman dari redeploy
 - **Media Broadcasting**: Support broadcast dengan media (photo/video/document)
-- **Rich Message Formatting**: HTML formatting support di broadcast & custom messages
+- **Rich Message Formatting**: Format bold/italic/blockquote di `/broadcast` & `/setmsg` otomatis kepakai persis seperti teks yang diketik/copy-paste — gak perlu ngetik tag HTML manual
 - **Enhanced /setmsg**: Support media attachments untuk custom messages
 - **Personalized Messages**: Placeholder variables untuk pesan personal ({ID},{NAME},{USERNAME},{DATE}, dll)
 - **Dynamic Content**: Real-time user data replacement di broadcast messages
@@ -135,6 +135,16 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/delkonten` - Hapus file dari protected list
 - `/getkonten` - Lihat daftar protected content
 - `/limitkonten` - Set limit untuk konten tertentu
+
+### User Limit Management (Admin)
+- `/setlimit JUMLAH` - Set limit download harian global (0-50, 0 = nonaktifkan download untuk semua user)
+- `/getlimit` - Lihat limit harian saat ini
+- `/setuserlimit USER_ID LIMIT` - Set limit custom per user (0-1000, 0 = blokir user ini)
+- `/deluserlimit USER_ID` - Hapus limit custom user (kembali ke limit global)
+- `/getuserlimits` - Lihat semua user dengan limit custom
+- `/userstats` - Statistik download semua user hari ini
+- `/resetlimits` - Reset semua limit download user
+- `/checkuser USER_ID` - Cek status limit user tertentu
 
 ### Anti-Leech Verification (Admin)
 - `/setverify on|off` - Aktifkan/nonaktifkan verifikasi anti-leech
