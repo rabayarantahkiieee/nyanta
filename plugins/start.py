@@ -26,6 +26,7 @@ from pyrogram import filters
 from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyromod.types import ListenerTypes
 
 from config import decode, get_messages, subsall, subsch, subsgc
 
@@ -814,7 +815,59 @@ async def send_text(client: Bot, message: Message):
     
     # Check if message contains placeholders
     has_placeholders = check_placeholders(broadcast_data.get("caption", "")) or check_placeholders(broadcast_data.get("content"))
-    
+
+    # Send a preview to the admin (with placeholders resolved using their own
+    # info as a sample) and require confirmation before broadcasting for real -
+    # formatting/typos are much cheaper to catch here than after users get it.
+    preview_caption = broadcast_data.get("caption", "")
+    preview_content = broadcast_data.get("content")
+    if has_placeholders:
+        try:
+            join_info = get_user_join_info(message.from_user.id)
+            preview_caption = replace_placeholders(preview_caption, message.from_user, join_info)
+            preview_content = replace_placeholders(preview_content, message.from_user, join_info)
+        except Exception as e:
+            logger.warning(f"Failed to resolve placeholders for preview: {e}")
+
+    await pls_wait.edit("<code>📢 Mengirim preview...</code>")
+    try:
+        await send_broadcast_message(
+            client=client,
+            chat_id=message.from_user.id,
+            broadcast_data=broadcast_data,
+            caption=preview_caption,
+            content=preview_content,
+            protect_content=False,
+        )
+    except Exception as e:
+        logger.error(f"Failed to send broadcast preview: {e}")
+        await pls_wait.edit(f"❌ <b>Gagal kirim preview:</b> `{e}`")
+        return
+
+    try:
+        confirmation = await client.ask(
+            chat_id=message.from_user.id,
+            text=f"⬆️ <b>Preview di atas.</b> Kirim ke <b>{len(user_ids):,} user</b>?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Kirim ke Semua", callback_data="broadcast_confirm")],
+                [InlineKeyboardButton("❌ Batal", callback_data="broadcast_cancel")],
+            ]),
+            listener_type=ListenerTypes.CALLBACK_QUERY,
+            timeout=60,
+        )
+    except asyncio.TimeoutError:
+        await pls_wait.edit("⏰ <b>Timeout, broadcast dibatalkan.</b>")
+        return
+
+    await confirmation.answer()
+    if confirmation.data != "broadcast_confirm":
+        await confirmation.message.edit_text("❌ <b>Broadcast dibatalkan.</b>")
+        await pls_wait.delete()
+        return
+
+    await confirmation.message.edit_text("✅ <b>Dikonfirmasi, memulai broadcast...</b>")
+    await pls_wait.edit("<code>📢 Preparing broadcast...</code>")
+
     # Get configuration values (base/floor values for adaptive throttling below)
     base_delay = 0.15 if has_placeholders else 0.05
     batch_size = 10  # Process in batches

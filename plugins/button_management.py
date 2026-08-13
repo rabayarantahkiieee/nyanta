@@ -242,36 +242,61 @@ async def send_custom_message(client, chat_id, msg_type, **kwargs):
 
 @Bot.on_message(filters.command("addbutton") & admin_filter)
 async def add_button(client: Bot, message: Message):
-    """Tambahkan custom button"""
-    if len(message.command) < 3:
-        await message.reply_text(
-            "❌ <b>Penggunaan:</b> /addbutton BUTTON_TEXT BUTTON_URL",
-            quote=True
-        )
-        return
-    
+    """Tambahkan custom button - via argumen langsung, atau interaktif kalau tanpa argumen"""
     try:
-        button_text = message.command[1]
-        button_url = " ".join(message.command[2:])
-        
+        new_buttons = []
+
+        if len(message.command) >= 3:
+            # Fast path: /addbutton TEXT URL
+            new_buttons.append({
+                "text": message.command[1],
+                "url": " ".join(message.command[2:]),
+            })
+        else:
+            # Interactive path: no args, tap through it instead
+            admin_id = message.from_user.id
+            first = await _prompt_for_one_button(client, admin_id)
+            if not first:
+                await message.reply_text("❌ <b>Dibatalkan, tidak ada button ditambahkan.</b>", quote=True)
+                return
+            new_buttons.append(first)
+
+            while True:
+                try:
+                    query = await client.ask(
+                        chat_id=admin_id,
+                        text=f"✅ <b>Button '{first['text']}' siap ditambahkan.</b>\n\nMau tambah button lagi?",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("➕ Tambah Button Lagi", callback_data="setmsg_addbtn")],
+                            [InlineKeyboardButton("✅ Selesai", callback_data="setmsg_done")],
+                        ]),
+                        listener_type=ListenerTypes.CALLBACK_QUERY,
+                        timeout=60,
+                    )
+                except asyncio.TimeoutError:
+                    break
+                await query.answer()
+                if query.data == "setmsg_done":
+                    break
+                more = await _prompt_for_one_button(client, admin_id)
+                if more:
+                    new_buttons.append(more)
+                    first = more  # so the next loop's confirmation line reads naturally
+
         settings = load_button_settings()
-        button_id = f"btn_{len(settings['custom_buttons']) + 1}"
-        
-        settings["custom_buttons"][button_id] = {
-            "text": button_text,
-            "url": button_url
-        }
-        
+        added_lines = []
+        for btn in new_buttons:
+            button_id = f"btn_{len(settings['custom_buttons']) + 1}"
+            settings["custom_buttons"][button_id] = btn
+            added_lines.append(f"├ <code>{button_id}</code>: {btn['text']} → {btn['url']}")
+
         save_button_settings(settings)
-        
+
         await message.reply_text(
-            f"✅ <b>Button berhasil ditambahkan!</b>\n\n"
-            f"<b>Button ID:</b> <code>{button_id}</code>\n"
-            f"<b>Text:</b> {button_text}\n"
-            f"<b>URL:</b> {button_url}",
+            f"✅ <b>{len(new_buttons)} button berhasil ditambahkan!</b>\n\n" + "\n".join(added_lines),
             quote=True
         )
-        
+
     except Exception as e:
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
@@ -400,6 +425,46 @@ def extract_html_after_prefix(message: Message, prefix: str) -> str:
     return Parser.unparse(str(full_text)[prefix_len:], adjusted, True)
 
 
+async def _prompt_for_one_button(client: Bot, admin_id: int):
+    """
+    Ask the admin for a button's text then its URL via client.ask(), one
+    prompt at a time. Returns {"text":..., "url":...}, or None if they
+    typed "batal", sent an invalid URL, or the prompt timed out.
+    """
+    try:
+        text_msg = await client.ask(
+            chat_id=admin_id,
+            text="✏️ <b>Kirim teks untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        return None
+    if not text_msg.text or text_msg.text.strip().lower() == "batal":
+        return None
+    button_text = text_msg.text.strip()
+
+    try:
+        url_msg = await client.ask(
+            chat_id=admin_id,
+            text="🔗 <b>Kirim URL untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        return None
+    button_url = (url_msg.text or "").strip()
+    if button_url.lower() == "batal":
+        return None
+
+    if not button_url.startswith(("http://", "https://", "tg://")):
+        await client.send_message(
+            admin_id,
+            "❌ <b>URL harus diawali http://, https://, atau tg://. Button ini dilewati.</b>",
+        )
+        return None
+
+    return {"text": button_text, "url": button_url}
+
+
 async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: list) -> list:
     """
     Interactive alternative to typing [Button Text](Button URL) manually:
@@ -432,39 +497,12 @@ async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: lis
             await query.message.edit_text(f"🔘 <b>Button final:</b>\n{preview}")
             break
 
-        try:
-            text_msg = await client.ask(
-                chat_id=admin_id,
-                text="✏️ <b>Kirim teks untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
-                timeout=120,
-            )
-        except asyncio.TimeoutError:
-            break
-        if not text_msg.text or text_msg.text.strip().lower() == "batal":
-            continue
-        button_text = text_msg.text.strip()
-
-        try:
-            url_msg = await client.ask(
-                chat_id=admin_id,
-                text="🔗 <b>Kirim URL untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
-                timeout=120,
-            )
-        except asyncio.TimeoutError:
-            break
-        button_url = (url_msg.text or "").strip()
-        if button_url.lower() == "batal":
+        new_button = await _prompt_for_one_button(client, admin_id)
+        if not new_button:
             continue
 
-        if not button_url.startswith(("http://", "https://", "tg://")):
-            await client.send_message(
-                admin_id,
-                "❌ <b>URL harus diawali http://, https://, atau tg://. Button ini dilewati.</b>",
-            )
-            continue
-
-        buttons.append({"text": button_text, "url": button_url})
-        await client.send_message(admin_id, f"✅ <b>Button '{button_text}' ditambahkan!</b>")
+        buttons.append(new_button)
+        await client.send_message(admin_id, f"✅ <b>Button '{new_button['text']}' ditambahkan!</b>")
 
     return buttons
 
