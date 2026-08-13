@@ -148,6 +148,8 @@ class Bot(Client):
                 BotCommand("feedback", "Kirim feedback ke developer"),
                 BotCommand("report", "Laporkan masalah atau bug"),
                 BotCommand("tutorial", "Panduan lengkap penggunaan bot"),
+                BotCommand("search", "Cari file berdasarkan nama"),
+                BotCommand("language", "Ganti bahasa bot / Change bot language"),
             ]
 
             # Admin commands (only visible to admins)
@@ -179,9 +181,6 @@ class Bot(Client):
                 BotCommand("delvar", "Hapus environment variable"),
                 BotCommand("getvar", "Lihat environment variable"),
                 BotCommand("usage", "Monitoring aplikasi Heroku"),
-                BotCommand("update", "Update bot dari GitHub"),
-                BotCommand("restart", "Restart bot"),
-                BotCommand("pull", "Pull update tanpa restart"),
                 BotCommand("viewfeedback", "Lihat feedback dari pengguna"),
                 BotCommand("viewreports", "Lihat laporan masalah dari pengguna"),
                 BotCommand("batch", "Generate link untuk multiple files"),
@@ -194,6 +193,9 @@ class Bot(Client):
                 BotCommand("setuserlimit", "Set custom limit untuk user tertentu"),
                 BotCommand("deluserlimit", "Hapus custom limit user"),
                 BotCommand("getuserlimits", "Lihat semua custom user limits"),
+                BotCommand("setverify", "Aktifkan/nonaktifkan verifikasi anti-leech"),
+                BotCommand("setverifydelay", "Set delay verifikasi (detik)"),
+                BotCommand("analytics", "Lihat dashboard analytics visual"),
             ]
 
             # Set commands for all users

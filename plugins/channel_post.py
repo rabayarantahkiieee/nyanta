@@ -9,8 +9,9 @@ from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot import Bot
-from config import ADMINS, CHANNEL_ID, DISABLE_CHANNEL_BUTTON, LOGGER
+from config import CHANNEL_ID, DISABLE_CHANNEL_BUTTON, LOGGER, admin_filter
 from config import encode
+from database.sql import add_file_to_index
 
 # Import for payment proof handling
 from .user_limits import set_user_custom_limit
@@ -23,7 +24,44 @@ except ImportError:
     CUSTOM_MESSAGES_AVAILABLE = False
 
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.forwarded)
+def extract_file_metadata(message: Message):
+    """
+    Extract (file_name, file_type, file_size) from a media message for the
+    search index. Returns (None, None, None) for non-media/text messages.
+    """
+    for file_type in ("document", "video", "audio", "animation", "voice", "video_note"):
+        media = getattr(message, file_type, None)
+        if media:
+            file_name = getattr(media, "file_name", None) or (
+                message.caption.split("\n")[0][:100] if message.caption else file_type
+            )
+            return file_name, file_type, getattr(media, "file_size", None)
+
+    if message.photo:
+        file_name = message.caption.split("\n")[0][:100] if message.caption else "photo"
+        return file_name, "photo", message.photo.file_size
+
+    return None, None, None
+
+
+def index_message_file(message: Message, indexed_message_id):
+    """Index a media message's metadata so it becomes searchable via /search."""
+    file_name, file_type, file_size = extract_file_metadata(message)
+    if not file_name:
+        return
+    try:
+        add_file_to_index(
+            message_id=indexed_message_id,
+            file_name=file_name,
+            file_type=file_type,
+            file_size=file_size,
+            caption=message.caption.html if message.caption else None,
+        )
+    except Exception as e:
+        LOGGER(__name__).warning(f"Failed to index file {indexed_message_id}: {e}")
+
+
+@Bot.on_message(filters.private & admin_filter & filters.forwarded)
 async def handle_forwarded_payment_proof(client: Bot, message: Message):
     """Handle forwarded payment proof from admin to upgrade user limit"""
     try:
@@ -70,7 +108,7 @@ async def handle_forwarded_payment_proof(client: Bot, message: Message):
 
 @Bot.on_message(
     filters.private
-    & filters.user(ADMINS)
+    & admin_filter
     & ~filters.forwarded
     & ~filters.command(
         [
@@ -86,7 +124,7 @@ async def handle_forwarded_payment_proof(client: Bot, message: Message):
             "getvar",
             "setvar",
             "speedtest",
-            "update",
+            "usage",
             "stats",
             "vars",
             "id",
@@ -122,6 +160,11 @@ async def handle_forwarded_payment_proof(client: Bot, message: Message):
             "setuserlimit",
             "deluserlimit",
             "getuserlimits",
+            "search",
+            "language",
+            "setverify",
+            "setverifydelay",
+            "analytics",
         ]
     )
 )
@@ -144,6 +187,8 @@ async def channel_post(client: Client, message: Message):
             # Fallback to default message
             await reply_text.edit_text("<b>Telah Terjadi Error...</b>")
         return
+    index_message_file(message, post_message.id)
+
     converted_id = post_message.id * abs(client.db_channel.id)
     string = f"get-{converted_id}"
     base64_string = await encode(string)
@@ -176,6 +221,8 @@ async def channel_post(client: Client, message: Message):
 
 @Bot.on_message(filters.channel & filters.incoming & filters.chat(CHANNEL_ID))
 async def new_post(client: Client, message: Message):
+
+    index_message_file(message, message.id)
 
     if DISABLE_CHANNEL_BUTTON:
         return

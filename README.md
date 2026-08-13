@@ -10,7 +10,6 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Real-time User Tracking**: Simpan status subscribe user secara real-time tanpa reset
 - **Auto Command Registration**: Commands otomatis terdaftar di menu bot Telegram
 - **Heroku Management**: Set/unset environment variables via bot
-- **Auto Updater**: Update bot otomatis dari GitHub repository
 - **Speedtest**: Cek kecepatan server real-time
 - **Admin Commands**: Management tools lengkap untuk admin
 - **Broadcast**: Kirim pesan ke semua user sekaligus
@@ -22,11 +21,18 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Multi-Platform**: Support deployment di Heroku, VPS, Docker
 - **Data Persistence**: Data user tersimpan aman meski redeploy
 - **Database Backup/Restore**: Backup & restore database lengkap dengan data user
+- **Persistent Button & Content Settings**: Custom button, custom message, protected content, dan limit konten tersimpan di database (bukan file lokal) sehingga aman dari redeploy
+- **Persistent Profile & Feedback**: Statistik profil, feedback, dan laporan user tersimpan di database (bukan file lokal) sehingga aman dari redeploy
 - **Media Broadcasting**: Support broadcast dengan media (photo/video/document)
-- **Rich Message Formatting**: HTML formatting support di broadcast & custom messages
-- **Enhanced /setmsg**: Support media attachments untuk custom messages
+- **Rich Message Formatting**: Format bold/italic/blockquote di `/broadcast` & `/setmsg` otomatis kepakai persis seperti teks yang diketik/copy-paste — gak perlu ngetik tag HTML manual
+- **Enhanced /setmsg**: Support media attachments untuk custom messages, plus tombol "➕ Tambah Button" buat nambah button secara interaktif (gak perlu ngetik format `[Text](URL)`)
 - **Personalized Messages**: Placeholder variables untuk pesan personal ({ID},{NAME},{USERNAME},{DATE}, dll)
 - **Dynamic Content**: Real-time user data replacement di broadcast messages
+- **File Search**: Cari file berdasarkan nama via `/search` atau inline query (`@botusername keyword`) langsung dari chat manapun
+- **Anti-Leech Verification**: Verifikasi 2 langkah dalam bot (tanpa shortlink eksternal) sebelum user bisa ambil file, opsional & bisa diatur admin
+- **Visual Analytics Dashboard**: `/analytics` generate grafik pertumbuhan user, downloads harian, distribusi rank, dan leaderboard sebagai gambar
+- **Multi-Bahasa (ID/EN)**: Pesan inti (alur ambil file, /about, error/limit) bisa diganti ke Bahasa Indonesia atau English via `/language`
+- **Adaptive Broadcast Throttling**: Delay & concurrency broadcast otomatis menyesuaikan saat FloodWait meningkat, lalu kembali normal saat aman
 
 ## 🚀 Deployment
 
@@ -58,6 +64,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - Default: `sqlite:///bot_database.db` (local SQLite, data may reset on redeploy)
 
 ### Optional
+- Untuk fitur inline search (`@botusername keyword`), aktifkan **Inline Mode** untuk bot melalui @BotFather (`/setinline`)
 - `FORCE_SUB_CHANNEL1`: ID channel pertama untuk force subscription
 - `FORCE_SUB_CHANNEL2`: ID channel kedua untuk force subscription (opsional)
 - `FORCE_SUB_CHANNEL3`: ID channel ketiga untuk force subscription (opsional)
@@ -67,8 +74,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `ADMINS`: List ID admin bot (space separated)
 - `HEROKU_APP_NAME`: Nama app Heroku
 - `HEROKU_API_KEY`: API key Heroku
-- `UPSTREAM_REPO`: Repository untuk updater
-- `UPSTREAM_BRANCH`: Branch untuk updater (default: master)
+- `SEVALLA_API_KEY`, `SEVALLA_PROJECT_ID`, `SEVALLA_SERVICE_ID`: Diperlukan untuk `/setvar`, `/delvar`, `/getvar`, `/setdb`, `/usage` (ambil dari Sevalla dashboard)
 
 ## 📱 Commands
 
@@ -87,8 +93,10 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/uptime` - Lihat status uptime bot
 - `/feedback` - Kirim feedback ke developer
 - `/report` - Laporkan masalah atau bug
+- `/search <kata kunci>` - Cari file berdasarkan nama (juga bisa via inline `@botusername kata kunci`)
+- `/language` - Ganti bahasa pesan inti bot (Indonesia/English)
 - `/tutorial` - Panduan lengkap penggunaan bot
-- `/stats` - Lihat statistik bot (alias /users)
+- `/stats` - Lihat statistik ringkas bot
 
 ### Admin Commands
 - `/users` - Statistik pengguna bot
@@ -128,16 +136,28 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `/getkonten` - Lihat daftar protected content
 - `/limitkonten` - Set limit untuk konten tertentu
 
+### User Limit Management (Admin)
+- `/setlimit JUMLAH` - Set limit download harian global (0-50, 0 = nonaktifkan download untuk semua user)
+- `/getlimit` - Lihat limit harian saat ini
+- `/setuserlimit USER_ID LIMIT` - Set limit custom per user (0-1000, 0 = blokir user ini)
+- `/deluserlimit USER_ID` - Hapus limit custom user (kembali ke limit global)
+- `/getuserlimits` - Lihat semua user dengan limit custom
+- `/userstats` - Statistik download semua user hari ini
+- `/resetlimits` - Reset semua limit download user
+- `/checkuser USER_ID` - Cek status limit user tertentu
+
+### Anti-Leech Verification (Admin)
+- `/setverify on|off` - Aktifkan/nonaktifkan verifikasi anti-leech
+- `/setverifydelay DETIK` - Atur delay verifikasi (default 10 detik)
+
+### Analytics (Admin)
+- `/analytics` - Dashboard visual (grafik pertumbuhan user, downloads harian, distribusi rank, leaderboard)
+
 ### Heroku Management
 - `/setvar VAR_NAME VAR_VALUE` - Set environment variable
 - `/delvar VAR_NAME` - Hapus environment variable
 - `/getvar VAR_NAME` - Lihat environment variable
 - `/usage` - Monitoring aplikasi Heroku
-
-### Bot Management
-- `/update` - Update bot dari GitHub repository
-- `/restart` - Restart bot
-- `/pull` - Pull update tanpa restart
 
 ### Feedback Management (Admin)
 - `/viewfeedback` - Lihat feedback dari pengguna
@@ -163,10 +183,15 @@ File-Sharing-Man/
     ├── cbb.py           # Callback query handlers
     ├── channel_post.py   # Channel posting & file management
     ├── getid.py         # User ID lookup & statistics
-    ├── heroku.py        # Heroku management tools
+    ├── heroku.py        # Heroku/Sevalla management tools
     ├── link_generator.py # Link generation untuk file sharing
+    ├── search.py         # File search & inline query
+    ├── verification.py   # Anti-leech verification
+    ├── i18n.py            # ID/EN translations
+    ├── language.py        # /language command
+    ├── analytics.py        # Visual analytics dashboard
+    ├── stats_utils.py      # Shared stats formatting helpers
     ├── speedtest.py     # Server speed test functionality
-    ├── updater.py       # Bot auto-updater dari GitHub
     ├── utils.py         # Utility functions & admin tools
     ├── admin_management.py    # Admin management system
     ├── button_management.py   # Custom button management

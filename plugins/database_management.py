@@ -8,10 +8,11 @@ import json
 from datetime import datetime
 
 from bot import Bot
-from config import ADMINS, LOGGER, DB_URI
+from config import LOGGER, DB_URI, admin_filter
 from pyrogram import filters
 from pyrogram.types import Message
 from database.sql import User, get_db
+from .heroku import sevalla_api_call, SEVALLA_PROJECT_ID, SEVALLA_SERVICE_ID
 
 BACKUP_DIR = "database_backups"
 
@@ -20,7 +21,7 @@ def ensure_backup_dir():
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
 
-@Bot.on_message(filters.command("getdb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getdb") & admin_filter)
 async def get_db_info(client: Bot, message: Message):
     """Informasi database"""
     try:
@@ -44,37 +45,41 @@ async def get_db_info(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("setdb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setdb") & admin_filter)
 async def set_db_config(client: Bot, message: Message):
-    """Set database configuration"""
+    """Set the DATABASE_URL environment variable via the Sevalla API"""
     if len(message.command) != 2:
         await message.reply_text("❌ <b>Penggunaan:</b> /setdb DATABASE_URL", quote=True)
         return
-    
+
     try:
         db_url = message.command[1]
-        
-        # Save to environment variable simulation
-        config = {
-            "database_url": db_url,
-            "last_updated": str(asyncio.get_event_loop().time())
-        }
-        
-        with open("db_config.json", "w") as f:
-            json.dump(config, f)
-        
-        await message.reply_text(
-            f"✅ <b>Database configuration berhasil diset!</b>\n\n"
-            f"<b>Database URL:</b> <code>{db_url}</code>\n"
-            f"<b>Status:</b> Ready untuk restart bot",
-            quote=True
+
+        result = sevalla_api_call(
+            "POST", f"/projects/{SEVALLA_PROJECT_ID}/services/{SEVALLA_SERVICE_ID}/env",
+            {"key": "DATABASE_URL", "value": db_url},
         )
-        
+
+        if "error" in result:
+            await message.reply_text(
+                f"❌ <b>Gagal set DATABASE_URL:</b> {result['error']}\n\n"
+                "💡 <b>Alternatif:</b> gunakan <code>/setvar DATABASE_URL VALUE</code> "
+                "atau set env var ini langsung dari dashboard hosting Anda.",
+                quote=True,
+            )
+        else:
+            await message.reply_text(
+                f"✅ <b>DATABASE_URL berhasil diset!</b>\n\n"
+                f"<b>Database URL:</b> <code>{db_url}</code>\n\n"
+                "🔄 <b>Restart bot untuk apply perubahan.</b>",
+                quote=True
+            )
+
     except Exception as e:
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("backupdb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("backupdb") & admin_filter)
 async def backup_database(client: Bot, message: Message):
     """Backup database - Real user data backup"""
     try:
@@ -146,7 +151,7 @@ async def backup_database(client: Bot, message: Message):
         LOGGER(__name__).error(f"Backup error: {e}")
         await message.reply_text(f"❌ <b>Backup Error:</b> `{str(e)}`", quote=True)
 
-@Bot.on_message(filters.command("restoredb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("restoredb") & admin_filter)
 async def restore_database(client: Bot, message: Message):
     """Restore database dari backup - Real user data restore"""
     if len(message.command) != 2:
@@ -158,8 +163,10 @@ async def restore_database(client: Bot, message: Message):
         return
 
     try:
-        backup_file = message.command[1]
-        backup_path = f"{BACKUP_DIR}/{backup_file}"
+        # Strip any directory components so a crafted filename like
+        # "../../etc/passwd" can't escape BACKUP_DIR and read arbitrary files.
+        backup_file = os.path.basename(message.command[1])
+        backup_path = os.path.join(BACKUP_DIR, backup_file)
 
         if not os.path.exists(backup_path):
             # List available backup files
@@ -204,29 +211,27 @@ async def restore_database(client: Bot, message: Message):
         # Clear existing users (optional - ask for confirmation)
         existing_count = db.query(User).count()
         if existing_count > 0:
-            await message.reply_text(
-                f"⚠️ <b>Database sudah berisi {existing_count} users!</b>\n\n"
-                "Apakah Anda ingin mengganti semua data dengan backup?\n"
-                "Reply dengan 'REPLACE' untuk melanjutkan:",
-                quote=True
-            )
-
-            def check_replace(m):
-                return m.from_user.id == message.from_user.id and m.text.upper() == "REPLACE"
-
             try:
-                confirm_msg = await client.wait_for_message(message.chat.id, filter=check_replace, timeout=30)
-                if confirm_msg:
-                    # Clear existing data
-                    db.query(User).delete()
-                    db.commit()
-                else:
-                    db.close()
-                    return
+                confirm_msg = await client.ask(
+                    chat_id=message.chat.id,
+                    text=f"⚠️ <b>Database sudah berisi {existing_count} users!</b>\n\n"
+                         "Apakah Anda ingin mengganti semua data dengan backup?\n"
+                         "Reply dengan 'REPLACE' untuk melanjutkan:",
+                    timeout=30,
+                )
             except asyncio.TimeoutError:
                 await message.reply_text("❌ <b>Timeout: Restore dibatalkan</b>", quote=True)
                 db.close()
                 return
+
+            if not confirm_msg.text or confirm_msg.text.upper() != "REPLACE":
+                await message.reply_text("❌ <b>Restore dibatalkan!</b>", quote=True)
+                db.close()
+                return
+
+            # Clear existing data
+            db.query(User).delete()
+            db.commit()
 
         # Restore users from backup
         restored_count = 0
@@ -277,8 +282,7 @@ async def restore_database(client: Bot, message: Message):
             f"<b>👥 Users Restored:</b> {restored_count}\n"
             f"<b>⏰ Backup Time:</b> {backup_data['timestamp']}\n"
             f"<b>💾 Database Type:</b> {backup_data.get('database_type', 'Unknown')}\n"
-            f"<b>📊 Status:</b> ✅ Restore successful\n\n"
-            f"<b>⚠️ Note:</b> Bot restart diperlukan untuk menerapkan perubahan",
+            f"<b>📊 Status:</b> ✅ Restore successful",
             quote=True
         )
 
@@ -286,35 +290,40 @@ async def restore_database(client: Bot, message: Message):
         LOGGER(__name__).error(f"Restore error: {e}")
         await message.reply_text(f"❌ <b>Restore Error:</b> `{str(e)}`", quote=True)
 
-@Bot.on_message(filters.command("cleardb") & filters.user(ADMINS))
+@Bot.on_message(filters.command("cleardb") & admin_filter)
 async def clear_database(client: Bot, message: Message):
-    """Clear database (WARNING: DANGEROUS!)"""
+    """Clear the users table (WARNING: DANGEROUS!)"""
     try:
+        try:
+            confirm_msg = await client.ask(
+                chat_id=message.chat.id,
+                text="⚠️ <b>WARNING: DATABASE CLEAR</b>\n\n"
+                     "Apakah Anda yakin ingin mengosongkan data user?\n"
+                     "Tindakan ini tidak dapat dibatalkan! Pertimbangkan <code>/backupdb</code> dulu.\n\n"
+                     "Reply dengan 'YA' untuk melanjutkan:",
+                timeout=30,
+            )
+        except asyncio.TimeoutError:
+            await message.reply_text("❌ <b>Timeout: Konfirmasi tidak diterima</b>", quote=True)
+            return
+
+        if not confirm_msg.text or confirm_msg.text != "YA":
+            await message.reply_text("❌ <b>Dibatalkan!</b>", quote=True)
+            return
+
+        db = get_db()
+        try:
+            deleted_count = db.query(User).delete()
+            db.commit()
+        finally:
+            db.close()
+
         await message.reply_text(
-            "⚠️ <b>WARNING: DATABASE CLEAR</b>\n\n"
-            "Apakah Anda yakin ingin mengosongkan database?\n"
-            "Tindakan ini tidak dapat dibatalkan!\n\n"
-            "Reply dengan 'YA' untuk melanjutkan:",
+            f"✅ <b>Database berhasil dikosongkan!</b>\n\n"
+            f"<b>Users dihapus:</b> {deleted_count}",
             quote=True
         )
-        
-        # Wait for confirmation
-        def check_confirm(m):
-            return m.from_user.id == message.from_user.id and m.text == "YA"
-        
-        confirm_msg = await client.wait_for_message(message.chat.id, filter=check_confirm, timeout=30)
-        
-        if confirm_msg:
-            # Clear database simulation
-            await message.reply_text(
-                "✅ <b>Database berhasil dikosongkan!</b>\n\n"
-                "<b>WARNING:</b> Semua data telah dihapus\n"
-                "Bot akan restart diperlukan",
-                quote=True
-            )
-        
-    except asyncio.TimeoutError:
-        await message.reply_text("❌ <b>Timeout: Konfirmasi tidak diterima</b>", quote=True)
+
     except Exception as e:
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)

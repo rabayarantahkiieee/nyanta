@@ -2,50 +2,84 @@
 # Recode by @yawrenmaru
 # Developed By Soxmed
 
+import asyncio
 import json
 import os
 
 from bot import Bot
-from config import ADMINS, LOGGER
+from config import LOGGER, admin_filter
 from pyrogram import filters
+from pyrogram.parser import Parser
+from pyrogram.types import MessageEntity as _MessageEntity
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from pyromod.types import ListenerTypes
 
-BUTTON_FILE = "button_settings.json"
+from database.sql import (
+    get_all_custom_buttons,
+    sync_custom_buttons,
+    get_default_buttons_enabled,
+    set_default_buttons_enabled,
+    get_custom_message_db,
+    set_custom_message_db,
+    get_all_custom_messages,
+)
+
+# Custom buttons, custom messages and their enable/disable flag are stored in
+# the database (see database/sql.py) so they survive redeploys, instead of a
+# local button_settings.json file.
+LEGACY_BUTTON_FILE = "button_settings.json"
+
+
+def _migrate_legacy_json_if_needed():
+    """One-time import of data from the old button_settings.json into the database."""
+    if not os.path.exists(LEGACY_BUTTON_FILE):
+        return
+    try:
+        with open(LEGACY_BUTTON_FILE, "r") as f:
+            legacy = json.load(f)
+
+        sync_custom_buttons(legacy.get("custom_buttons", {}))
+        set_default_buttons_enabled(legacy.get("default_buttons", True))
+
+        for msg_type, message_data in legacy.get("custom_messages", {}).items():
+            # Old format allowed a plain string for a text-only message
+            if isinstance(message_data, str):
+                message_data = {
+                    "type": "text",
+                    "content": message_data,
+                    "media_id": None,
+                    "media_type": None,
+                    "buttons": [],
+                }
+            set_custom_message_db(msg_type, message_data)
+
+        os.rename(LEGACY_BUTTON_FILE, LEGACY_BUTTON_FILE + ".migrated")
+        print("[INFO] Migrated button_settings.json into the database")
+    except Exception as e:
+        print(f"[WARNING] Failed to migrate legacy button_settings.json: {e}")
+
+
+_migrate_legacy_json_if_needed()
+
 
 def load_button_settings():
-    """Load button settings from file"""
-    if os.path.exists(BUTTON_FILE):
-        with open(BUTTON_FILE, 'r') as f:
-            return json.load(f)
+    """Load button settings from the database, shaped like the old JSON file."""
     return {
-        "custom_buttons": {},
-        "default_buttons": True,
-        "custom_messages": {}
+        "custom_buttons": get_all_custom_buttons(),
+        "default_buttons": get_default_buttons_enabled(),
+        "custom_messages": get_all_custom_messages(),
     }
 
 def save_button_settings(settings):
-    """Save button settings to file"""
-    with open(BUTTON_FILE, 'w') as f:
-        json.dump(settings, f, indent=2)
+    """Persist a full settings dict (as produced by load_button_settings) to the database."""
+    sync_custom_buttons(settings.get("custom_buttons", {}))
+    set_default_buttons_enabled(settings.get("default_buttons", True))
+    for msg_type, data in settings.get("custom_messages", {}).items():
+        set_custom_message_db(msg_type, data)
 
 def get_custom_message(msg_type):
     """Get custom message with media support"""
-    settings = load_button_settings()
-    message_data = settings.get("custom_messages", {}).get(msg_type)
-
-    if not message_data:
-        return None
-
-    # Backward compatibility: if it's a string, convert to dict format
-    if isinstance(message_data, str):
-        return {
-            "type": "text",
-            "content": message_data,
-            "media_id": None,
-            "media_type": None
-        }
-
-    return message_data
+    return get_custom_message_db(msg_type)
 
 async def send_custom_message(client, chat_id, msg_type, **kwargs):
     """Send custom message with media support"""
@@ -206,7 +240,7 @@ async def send_custom_message(client, chat_id, msg_type, **kwargs):
         print(f"Error sending custom message {msg_type}: {e}")
         return False
 
-@Bot.on_message(filters.command("addbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("addbutton") & admin_filter)
 async def add_button(client: Bot, message: Message):
     """Tambahkan custom button"""
     if len(message.command) < 3:
@@ -242,7 +276,7 @@ async def add_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("delbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("delbutton") & admin_filter)
 async def del_button(client: Bot, message: Message):
     """Hapus custom button"""
     if len(message.command) != 2:
@@ -272,7 +306,7 @@ async def del_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("getbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getbutton") & admin_filter)
 async def get_button(client: Bot, message: Message):
     """Lihat daftar custom buttons"""
     try:
@@ -299,7 +333,7 @@ async def get_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("limitbutton") & filters.user(ADMINS))
+@Bot.on_message(filters.command("limitbutton") & admin_filter)
 async def limit_button(client: Bot, message: Message):
     """Enable/disable custom button feature"""
     if len(message.command) != 2:
@@ -332,7 +366,110 @@ async def limit_button(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("setmsg") & filters.user(ADMINS))
+def extract_html_after_prefix(message: Message, prefix: str) -> str:
+    """
+    Return the HTML-formatted remainder of message.text after `prefix`,
+    preserving whatever bold/italic/blockquote/etc. formatting the admin
+    actually applied (or pasted) - no manual <b>/<i> tags required.
+
+    Telegram stores formatting as a list of entities (offset/length in the
+    message text), separate from the plain text itself. message.text.html
+    only renders the *whole* message, so to get just "everything after the
+    command", the entities need their offsets shifted left by the prefix
+    length (and trimmed/dropped if they started inside the prefix) before
+    handing them to Pyrogram's own HTML renderer.
+    """
+    full_text = message.text
+    prefix_len = len(prefix)
+    entities = full_text.entities or []
+
+    adjusted = []
+    for e in entities:
+        new_offset = e.offset - prefix_len
+        new_length = e.length
+        if new_offset < 0:
+            new_length += new_offset
+            new_offset = 0
+        if new_length <= 0:
+            continue
+        adjusted.append(_MessageEntity(
+            type=e.type, offset=new_offset, length=new_length,
+            url=e.url, user=e.user, language=e.language, custom_emoji_id=e.custom_emoji_id,
+        ))
+
+    return Parser.unparse(str(full_text)[prefix_len:], adjusted, True)
+
+
+async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: list) -> list:
+    """
+    Interactive alternative to typing [Button Text](Button URL) manually:
+    after /setmsg's content is ready, let the admin tap through adding
+    buttons one at a time via inline keyboard + prompts, instead of
+    hand-writing the markup syntax. Returns the final button list
+    (starting from whatever bracket-syntax buttons were already parsed).
+    """
+    buttons = list(buttons)
+
+    while True:
+        preview = "\n".join(f"• {b['text']} → {b['url']}" for b in buttons) or "<i>Belum ada button</i>"
+        try:
+            query = await client.ask(
+                chat_id=admin_id,
+                text=f"🔘 <b>Button saat ini:</b>\n{preview}\n\nMau tambah button?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Tambah Button", callback_data="setmsg_addbtn")],
+                    [InlineKeyboardButton("✅ Selesai", callback_data="setmsg_done")],
+                ]),
+                listener_type=ListenerTypes.CALLBACK_QUERY,
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            break
+
+        await query.answer()
+
+        if query.data == "setmsg_done":
+            await query.message.edit_text(f"🔘 <b>Button final:</b>\n{preview}")
+            break
+
+        try:
+            text_msg = await client.ask(
+                chat_id=admin_id,
+                text="✏️ <b>Kirim teks untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            break
+        if not text_msg.text or text_msg.text.strip().lower() == "batal":
+            continue
+        button_text = text_msg.text.strip()
+
+        try:
+            url_msg = await client.ask(
+                chat_id=admin_id,
+                text="🔗 <b>Kirim URL untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            break
+        button_url = (url_msg.text or "").strip()
+        if button_url.lower() == "batal":
+            continue
+
+        if not button_url.startswith(("http://", "https://", "tg://")):
+            await client.send_message(
+                admin_id,
+                "❌ <b>URL harus diawali http://, https://, atau tg://. Button ini dilewati.</b>",
+            )
+            continue
+
+        buttons.append({"text": button_text, "url": button_url})
+        await client.send_message(admin_id, f"✅ <b>Button '{button_text}' ditambahkan!</b>")
+
+    return buttons
+
+
+@Bot.on_message(filters.command("setmsg") & admin_filter)
 async def set_custom_message(client: Bot, message: Message):
     """Set custom message untuk berbagai situasi dengan support media"""
     if len(message.command) < 2:
@@ -342,7 +479,9 @@ async def set_custom_message(client: Bot, message: Message):
             "<b>Types:</b> welcome, error, limit, protected, custom\n\n"
             "<b>Media Support:</b> Photo, Video, Document, Audio\n"
             "<b>Max File Size:</b> 50MB\n\n"
-            "<b>Button Support:</b> [Button Text](Button URL)\n"
+            "<b>Button Support:</b> ketik <code>[Button Text](Button URL)</code>, "
+            "atau setelah kirim command ini bakal ada tombol <b>➕ Tambah Button</b> buat nambahin secara interaktif "
+            "(gak perlu ngetik format apa-apa)\n"
             "<b>Multiple Buttons in One Row:</b> [Button1](URL1) && [Button2](URL2)\n"
             "<b>Example:</b> /setmsg welcome Hello [Click Here](https://example.com) && [Another Button](https://example.org)",
             quote=True
@@ -370,25 +509,25 @@ async def set_custom_message(client: Bot, message: Message):
                 msg_data["type"] = "photo"
                 msg_data["media_id"] = replied.photo.file_id
                 msg_data["media_type"] = "photo"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.video:
                 msg_data["type"] = "video"
                 msg_data["media_id"] = replied.video.file_id
                 msg_data["media_type"] = "video"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.document:
                 msg_data["type"] = "document"
                 msg_data["media_id"] = replied.document.file_id
                 msg_data["media_type"] = "document"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.audio:
                 msg_data["type"] = "audio"
                 msg_data["media_id"] = replied.audio.file_id
                 msg_data["media_type"] = "audio"
-                msg_data["content"] = replied.caption or ""
+                msg_data["content"] = replied.caption.html if replied.caption else ""
             elif replied.text:
                 msg_data["type"] = "text"
-                msg_data["content"] = replied.text
+                msg_data["content"] = replied.text.html
             else:
                 await message.reply_text("❌ <b>Tipe media tidak didukung!</b>\n\n<b>Supported:</b> Text, Photo, Video, Document, Audio", quote=True)
                 return
@@ -459,8 +598,11 @@ async def set_custom_message(client: Bot, message: Message):
                 await message.reply_text("❌ <b>Harus ada MESSAGE_TEXT atau reply ke pesan/media!</b>", quote=True)
                 return
             msg_data["type"] = "text"
-            msg_data["content"] = " ".join(message.command[2:])
-            
+            raw_text = str(message.text)
+            rest = raw_text.split(None, 2)[2]
+            prefix = raw_text[:len(raw_text) - len(rest)]
+            msg_data["content"] = extract_html_after_prefix(message, prefix)
+
             # Parse buttons from content if they exist
             # Format: [Button Text](Button URL) && [Button Text](Button URL)
             import re
@@ -503,6 +645,11 @@ async def set_custom_message(client: Bot, message: Message):
                     msg_data["content"] = msg_data["content"].replace("&&", "").strip()
             except Exception as e:
                 print(f"Error parsing buttons from content: {e}")
+
+        # Offer to add buttons interactively instead of typing [Text](URL) by hand
+        msg_data["buttons"] = await collect_buttons_interactively(
+            client, message.from_user.id, msg_data["buttons"]
+        )
 
         # Save to settings
         settings = load_button_settings()

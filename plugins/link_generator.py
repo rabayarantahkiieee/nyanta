@@ -6,11 +6,11 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot import Bot
-from config import ADMINS
+from config import admin_filter
 from config import encode, get_message_id
 
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.command("batch"))
+@Bot.on_message(filters.private & admin_filter & filters.command("batch"))
 async def batch(client: Client, message: Message):
     while True:
         try:
@@ -69,7 +69,7 @@ async def batch(client: Client, message: Message):
     )
 
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.command("genlink"))
+@Bot.on_message(filters.private & admin_filter & filters.command("genlink"))
 async def link_generator(client: Client, message: Message):
     while True:
         try:

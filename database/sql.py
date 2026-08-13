@@ -2,10 +2,11 @@
 # Recode by @yawrenmaru
 # Developed By Soxmed
 
+import json
 import os
 import threading
-from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, MetaData, Table, Boolean
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, MetaData, Table, Boolean, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.sql import func
@@ -55,6 +56,129 @@ class User(Base):
     status = Column(String(20), default=USER_STATUS_ACTIVE, nullable=False)
     is_blocked = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False)
+    language = Column(String(5), nullable=True)
+
+DEFAULT_LANGUAGE = "id"
+SUPPORTED_LANGUAGES = ("id", "en")
+
+class Admin(Base):
+    """Dynamically-added bot admins (on top of the ADMINS env var)."""
+    __tablename__ = "admins"
+
+    user_id = Column(BigInteger, primary_key=True)
+
+class BotSetting(Base):
+    """Generic key/value store for global bot configuration."""
+    __tablename__ = "bot_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(String, nullable=True)
+
+class UserCustomLimit(Base):
+    """Per-user override of the global daily download limit."""
+    __tablename__ = "user_custom_limits"
+
+    user_id = Column(BigInteger, primary_key=True)
+    daily_limit = Column(Integer, nullable=False)
+
+class UserDailyDownload(Base):
+    """Tracks how many downloads a user made on a given date."""
+    __tablename__ = "user_daily_downloads"
+
+    user_id = Column(BigInteger, primary_key=True)
+    date = Column(String(10), nullable=False)
+    download_count = Column(Integer, default=0, nullable=False)
+
+class UserVerification(Base):
+    """Tracks how long a user's in-bot anti-leech verification stays valid."""
+    __tablename__ = "user_verifications"
+
+    user_id = Column(BigInteger, primary_key=True)
+    verified_until = Column(DateTime(timezone=True), nullable=False)
+
+class CustomButton(Base):
+    """Admin-configured buttons shown alongside delivered files."""
+    __tablename__ = "custom_buttons"
+
+    button_id = Column(String(32), primary_key=True)
+    text = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+
+class CustomMessage(Base):
+    """Admin-configured messages for situations like welcome/error/limit/protected."""
+    __tablename__ = "custom_messages"
+
+    msg_type = Column(String(32), primary_key=True)
+    content_type = Column(String(20), default="text", nullable=False)
+    content = Column(String, nullable=True)
+    media_id = Column(String, nullable=True)
+    media_type = Column(String(20), nullable=True)
+    buttons_json = Column(String, nullable=True)
+
+class ProtectedFile(Base):
+    """Files flagged as protected via /addkonten."""
+    __tablename__ = "protected_files"
+
+    message_id = Column(BigInteger, primary_key=True)
+
+class UserProfileStats(Base):
+    """Cumulative /profile stats: total downloads, activity score, daily streak."""
+    __tablename__ = "user_profile_stats"
+
+    user_id = Column(BigInteger, primary_key=True)
+    total_downloads = Column(Integer, default=0, nullable=False)
+    activity_score = Column(Integer, default=0, nullable=False)
+    streak_days = Column(Integer, default=1, nullable=False)
+    last_active_date = Column(String(10), nullable=True)
+
+class UserFeedback(Base):
+    """Messages submitted via /feedback."""
+    __tablename__ = "user_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    username = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    message = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class UserReport(Base):
+    """Issues submitted via /report."""
+    __tablename__ = "user_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    username = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    issue = Column(String, nullable=False)
+    status = Column(String(20), default="pending", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class DailyStats(Base):
+    """Aggregate download count per calendar day, for growth/analytics charts."""
+    __tablename__ = "daily_stats"
+
+    date = Column(String(10), primary_key=True)
+    downloads = Column(Integer, default=0, nullable=False)
+
+class ContentDownloadLimit(Base):
+    """Per-file remaining download count, set independently via /limitkonten."""
+    __tablename__ = "content_download_limits"
+
+    message_id = Column(BigInteger, primary_key=True)
+    download_limit = Column(Integer, nullable=False)
+
+class FileIndex(Base):
+    """Searchable index of files stored in the database channel."""
+    __tablename__ = "file_index"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(BigInteger, unique=True, index=True, nullable=False)
+    file_name = Column(String, nullable=False, index=True)
+    file_type = Column(String(20), nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    caption = Column(String, nullable=True)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Create tables with error handling
 try:
@@ -66,25 +190,46 @@ try:
         try:
             with engine.connect() as conn:
                 # Check if user_id column is still INTEGER and needs to be changed to BIGINT
-                result = conn.execute("SELECT data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'user_id'")
+                result = conn.execute(text("SELECT data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'user_id'"))
                 row = result.fetchone()
                 if row and row[0] == 'integer':
                     print("[INFO] Migrating user_id column from INTEGER to BIGINT...")
-                    conn.execute("ALTER TABLE users ALTER COLUMN user_id TYPE BIGINT")
+                    conn.execute(text("ALTER TABLE users ALTER COLUMN user_id TYPE BIGINT"))
                     conn.commit()
                     print("[INFO] Database migration completed successfully")
-                
+
                 # Check if status column exists, if not add it
-                result = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'status'")
+                result = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'status'"))
                 if result.fetchone() is None:
                     print("[INFO] Adding status columns to users table...")
-                    conn.execute("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
-                    conn.execute("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE")
-                    conn.execute("ALTER TABLE users ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'"))
+                    conn.execute(text("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE"))
+                    conn.execute(text("ALTER TABLE users ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"))
                     conn.commit()
                     print("[INFO] Status columns added successfully")
+
+                # Check if language column exists, if not add it
+                result = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'language'"))
+                if result.fetchone() is None:
+                    print("[INFO] Adding language column to users table...")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR(5)"))
+                    conn.commit()
+                    print("[INFO] Language column added successfully")
         except Exception as migration_e:
             print(f"[WARNING] Database migration failed: {migration_e}")
+            # Continue execution
+    else:
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("PRAGMA table_info(users)"))
+                existing_columns = {row[1] for row in result.fetchall()}
+                if "language" not in existing_columns:
+                    print("[INFO] Adding language column to users table...")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR(5)"))
+                    conn.commit()
+                    print("[INFO] Language column added successfully")
+        except Exception as migration_e:
+            print(f"[WARNING] SQLite database migration failed: {migration_e}")
             # Continue execution
 
 except Exception as e:
@@ -414,12 +559,1052 @@ def get_indonesian_weekday(dt):
     }
     return days.get(dt.weekday(), 'Unknown')
 
+DEFAULT_DAILY_LIMIT = 2
+DAILY_LIMIT_SETTING_KEY = "daily_download_limit"
+
+
+def get_all_admin_ids():
+    """Get all dynamically-added admin user IDs (on top of the ADMINS env var)."""
+    db = get_db()
+    try:
+        return [r.user_id for r in db.query(Admin).all()]
+    except Exception as e:
+        print(f"Get all admin ids error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def add_admin_db(user_id):
+    db = get_db()
+    try:
+        if not db.query(Admin).filter(Admin.user_id == user_id).first():
+            db.add(Admin(user_id=user_id))
+            db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add admin error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def remove_admin_db(user_id):
+    db = get_db()
+    try:
+        row = db.query(Admin).filter(Admin.user_id == user_id).first()
+        if row:
+            db.delete(row)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Remove admin error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_setting(key, default=None):
+    """Get a global bot setting value (always returned as string, or default)."""
+    db = get_db()
+    try:
+        row = db.query(BotSetting).filter(BotSetting.key == key).first()
+        return row.value if row else default
+    except Exception as e:
+        print(f"Get setting error: {e}")
+        return default
+    finally:
+        db.close()
+
+
+def set_setting(key, value):
+    """Set a global bot setting value."""
+    db = get_db()
+    try:
+        row = db.query(BotSetting).filter(BotSetting.key == key).first()
+        if row:
+            row.value = str(value)
+        else:
+            db.add(BotSetting(key=key, value=str(value)))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set setting error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_daily_limit_config():
+    """Get the global daily download limit."""
+    value = get_setting(DAILY_LIMIT_SETTING_KEY)
+    try:
+        return int(value) if value is not None else DEFAULT_DAILY_LIMIT
+    except (TypeError, ValueError):
+        return DEFAULT_DAILY_LIMIT
+
+
+def set_daily_limit_config(new_limit):
+    """Set the global daily download limit."""
+    return set_setting(DAILY_LIMIT_SETTING_KEY, new_limit)
+
+
+def get_user_custom_limit_db(user_id):
+    """Get a user's custom daily limit, or None if not set."""
+    db = get_db()
+    try:
+        row = db.query(UserCustomLimit).filter(UserCustomLimit.user_id == user_id).first()
+        return row.daily_limit if row else None
+    except Exception as e:
+        print(f"Get user custom limit error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def set_user_custom_limit_db(user_id, limit):
+    """Set a user's custom daily limit."""
+    db = get_db()
+    try:
+        row = db.query(UserCustomLimit).filter(UserCustomLimit.user_id == user_id).first()
+        if row:
+            row.daily_limit = limit
+        else:
+            db.add(UserCustomLimit(user_id=user_id, daily_limit=limit))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set user custom limit error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def delete_user_custom_limit_db(user_id):
+    """Delete a user's custom daily limit. Returns True if a row was removed."""
+    db = get_db()
+    try:
+        row = db.query(UserCustomLimit).filter(UserCustomLimit.user_id == user_id).first()
+        if row:
+            db.delete(row)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Delete user custom limit error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_user_custom_limits_db():
+    """Get all users with a custom daily limit as {user_id_str: limit}."""
+    db = get_db()
+    try:
+        rows = db.query(UserCustomLimit).all()
+        return {str(r.user_id): r.daily_limit for r in rows}
+    except Exception as e:
+        print(f"Get all user custom limits error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+def try_consume_daily_download(user_id, today, daily_limit):
+    """
+    Atomically check-and-increment today's download counter for a user,
+    resetting the counter first when the stored date differs from `today`.
+    Returns True if the download is allowed (counter incremented), False if the
+    daily limit has already been reached.
+    """
+    db = get_db()
+    try:
+        row = db.query(UserDailyDownload).filter(UserDailyDownload.user_id == user_id).first()
+        if row is None:
+            row = UserDailyDownload(user_id=user_id, date=today, download_count=0)
+            db.add(row)
+        elif row.date != today:
+            row.date = today
+            row.download_count = 0
+
+        if row.download_count >= daily_limit:
+            db.commit()
+            return False
+
+        row.download_count += 1
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Try consume daily download error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_daily_download_count(user_id, today):
+    """Get today's download count for a user without incrementing it."""
+    db = get_db()
+    try:
+        row = db.query(UserDailyDownload).filter(UserDailyDownload.user_id == user_id).first()
+        if row is None or row.date != today:
+            return 0
+        return row.download_count
+    except Exception as e:
+        print(f"Get daily download count error: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+def reset_all_daily_downloads(today):
+    """Reset every user's daily download counter (admin function)."""
+    db = get_db()
+    try:
+        db.query(UserDailyDownload).update({
+            UserDailyDownload.download_count: 0,
+            UserDailyDownload.date: today,
+        })
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Reset all daily downloads error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_daily_downloads(today):
+    """Get all users' download rows relevant to `today` as list of dicts."""
+    db = get_db()
+    try:
+        rows = db.query(UserDailyDownload).all()
+        result = []
+        for row in rows:
+            count = row.download_count if row.date == today else 0
+            result.append({"user_id": row.user_id, "today_downloads": count})
+        return result
+    except Exception as e:
+        print(f"Get all daily downloads error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def add_file_to_index(message_id, file_name, file_type=None, file_size=None, caption=None):
+    """Add or update a file's entry in the searchable file index."""
+    if not file_name:
+        return False
+    db = get_db()
+    try:
+        row = db.query(FileIndex).filter(FileIndex.message_id == message_id).first()
+        if row:
+            row.file_name = file_name
+            row.file_type = file_type
+            row.file_size = file_size
+            row.caption = caption
+        else:
+            db.add(FileIndex(
+                message_id=message_id,
+                file_name=file_name,
+                file_type=file_type,
+                file_size=file_size,
+                caption=caption,
+            ))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add file to index error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def search_file_index(keyword, limit=20):
+    """Search indexed files by (case-insensitive) filename substring."""
+    db = get_db()
+    try:
+        pattern = f"%{keyword}%"
+        rows = (
+            db.query(FileIndex)
+            .filter(FileIndex.file_name.ilike(pattern))
+            .order_by(FileIndex.added_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "message_id": r.message_id,
+                "file_name": r.file_name,
+                "file_type": r.file_type,
+                "file_size": r.file_size,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"Search file index error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_file_index_count():
+    """Get total number of indexed files."""
+    db = get_db()
+    try:
+        return db.query(FileIndex).count()
+    except Exception as e:
+        print(f"Get file index count error: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+VERIFICATION_ENABLED_KEY = "verification_enabled"
+VERIFICATION_DELAY_SECONDS_KEY = "verification_delay_seconds"
+VERIFICATION_VALID_HOURS_KEY = "verification_valid_hours"
+DEFAULT_VERIFICATION_DELAY_SECONDS = 10
+DEFAULT_VERIFICATION_VALID_HOURS = 24
+
+
+def is_verification_enabled():
+    """Whether the in-bot anti-leech verification gate is active."""
+    return get_setting(VERIFICATION_ENABLED_KEY, "0") == "1"
+
+
+def set_verification_enabled(enabled):
+    return set_setting(VERIFICATION_ENABLED_KEY, "1" if enabled else "0")
+
+
+def get_verification_delay_seconds():
+    value = get_setting(VERIFICATION_DELAY_SECONDS_KEY)
+    try:
+        return int(value) if value is not None else DEFAULT_VERIFICATION_DELAY_SECONDS
+    except (TypeError, ValueError):
+        return DEFAULT_VERIFICATION_DELAY_SECONDS
+
+
+def set_verification_delay_seconds(seconds):
+    return set_setting(VERIFICATION_DELAY_SECONDS_KEY, seconds)
+
+
+def get_verification_valid_hours():
+    value = get_setting(VERIFICATION_VALID_HOURS_KEY)
+    try:
+        return int(value) if value is not None else DEFAULT_VERIFICATION_VALID_HOURS
+    except (TypeError, ValueError):
+        return DEFAULT_VERIFICATION_VALID_HOURS
+
+
+def set_verification_valid_hours(hours):
+    return set_setting(VERIFICATION_VALID_HOURS_KEY, hours)
+
+
+def is_user_verified(user_id):
+    """Whether the user currently has a non-expired verification."""
+    db = get_db()
+    try:
+        row = db.query(UserVerification).filter(UserVerification.user_id == user_id).first()
+        if not row:
+            return False
+        expires_at = row.verified_until
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) < expires_at
+    except Exception as e:
+        print(f"Is user verified error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def set_user_verified(user_id, hours=None):
+    """Mark a user as verified for `hours` (defaults to the configured value)."""
+    if hours is None:
+        hours = get_verification_valid_hours()
+    db = get_db()
+    try:
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
+        row = db.query(UserVerification).filter(UserVerification.user_id == user_id).first()
+        if row:
+            row.verified_until = expires_at
+        else:
+            db.add(UserVerification(user_id=user_id, verified_until=expires_at))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set user verified error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_user_language(user_id):
+    """Get a user's preferred language code, or None if not set."""
+    db = get_db()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        return user.language if user and user.language in SUPPORTED_LANGUAGES else None
+    except Exception as e:
+        print(f"Get user language error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def set_user_language(user_id, language):
+    """Set a user's preferred language code."""
+    if language not in SUPPORTED_LANGUAGES:
+        return False
+    db = get_db()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if user:
+            user.language = language
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Set user language error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+# =============================================================================
+# CUSTOM BUTTONS
+# =============================================================================
+
+def get_all_custom_buttons():
+    """Get all custom buttons as {button_id: {"text":..., "url":...}}."""
+    db = get_db()
+    try:
+        rows = db.query(CustomButton).all()
+        return {r.button_id: {"text": r.text, "url": r.url} for r in rows}
+    except Exception as e:
+        print(f"Get all custom buttons error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+def sync_custom_buttons(buttons):
+    """Replace all custom buttons with the given {button_id: {"text","url"}} dict."""
+    db = get_db()
+    try:
+        existing = {r.button_id: r for r in db.query(CustomButton).all()}
+        for button_id, row in list(existing.items()):
+            if button_id not in buttons:
+                db.delete(row)
+        for button_id, data in buttons.items():
+            if button_id in existing:
+                existing[button_id].text = data.get("text", "")
+                existing[button_id].url = data.get("url", "")
+            else:
+                db.add(CustomButton(button_id=button_id, text=data.get("text", ""), url=data.get("url", "")))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Sync custom buttons error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+DEFAULT_BUTTONS_ENABLED_KEY = "default_buttons_enabled"
+
+
+def get_default_buttons_enabled():
+    """Whether the channel's own file buttons are shown alongside custom ones."""
+    return get_setting(DEFAULT_BUTTONS_ENABLED_KEY, "1") == "1"
+
+
+def set_default_buttons_enabled(enabled):
+    return set_setting(DEFAULT_BUTTONS_ENABLED_KEY, "1" if enabled else "0")
+
+
+# =============================================================================
+# CUSTOM MESSAGES
+# =============================================================================
+
+def _custom_message_row_to_dict(row):
+    return {
+        "type": row.content_type,
+        "content": row.content or "",
+        "media_id": row.media_id,
+        "media_type": row.media_type,
+        "buttons": json.loads(row.buttons_json) if row.buttons_json else [],
+    }
+
+
+def get_custom_message_db(msg_type):
+    """Get one custom message's data, or None if not configured."""
+    db = get_db()
+    try:
+        row = db.query(CustomMessage).filter(CustomMessage.msg_type == msg_type).first()
+        return _custom_message_row_to_dict(row) if row else None
+    except Exception as e:
+        print(f"Get custom message error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def set_custom_message_db(msg_type, data):
+    """Set/replace one custom message's data."""
+    db = get_db()
+    try:
+        row = db.query(CustomMessage).filter(CustomMessage.msg_type == msg_type).first()
+        content_type = data.get("type", "text")
+        content = data.get("content", "")
+        media_id = data.get("media_id")
+        media_type = data.get("media_type")
+        buttons_json = json.dumps(data.get("buttons", []))
+        if row:
+            row.content_type = content_type
+            row.content = content
+            row.media_id = media_id
+            row.media_type = media_type
+            row.buttons_json = buttons_json
+        else:
+            db.add(CustomMessage(
+                msg_type=msg_type,
+                content_type=content_type,
+                content=content,
+                media_id=media_id,
+                media_type=media_type,
+                buttons_json=buttons_json,
+            ))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set custom message error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_custom_messages():
+    """Get all custom messages as {msg_type: message_data_dict}."""
+    db = get_db()
+    try:
+        rows = db.query(CustomMessage).all()
+        return {r.msg_type: _custom_message_row_to_dict(r) for r in rows}
+    except Exception as e:
+        print(f"Get all custom messages error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+# =============================================================================
+# CONTENT PROTECTION
+# =============================================================================
+
+def is_file_protected(message_id):
+    """Whether a file (by db-channel message id) is flagged as protected."""
+    db = get_db()
+    try:
+        return db.query(ProtectedFile).filter(ProtectedFile.message_id == message_id).first() is not None
+    except Exception as e:
+        print(f"Is file protected error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def add_protected_file_db(message_id):
+    db = get_db()
+    try:
+        exists = db.query(ProtectedFile).filter(ProtectedFile.message_id == message_id).first()
+        if not exists:
+            db.add(ProtectedFile(message_id=message_id))
+            db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add protected file error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def remove_protected_file_db(message_id):
+    db = get_db()
+    try:
+        row = db.query(ProtectedFile).filter(ProtectedFile.message_id == message_id).first()
+        if row:
+            db.delete(row)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        print(f"Remove protected file error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_all_protected_message_ids():
+    db = get_db()
+    try:
+        return [r.message_id for r in db.query(ProtectedFile).all()]
+    except Exception as e:
+        print(f"Get all protected message ids error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def sync_protected_files(message_ids):
+    """Replace the protected-files set with the given iterable of ids."""
+    db = get_db()
+    try:
+        target_ids = {int(mid) for mid in message_ids}
+        existing = {r.message_id: r for r in db.query(ProtectedFile).all()}
+        for mid, row in list(existing.items()):
+            if mid not in target_ids:
+                db.delete(row)
+        for mid in target_ids:
+            if mid not in existing:
+                db.add(ProtectedFile(message_id=mid))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Sync protected files error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def set_content_limit_db(message_id, limit):
+    """Set the remaining download count for a file, independent of protected status."""
+    db = get_db()
+    try:
+        row = db.query(ContentDownloadLimit).filter(ContentDownloadLimit.message_id == message_id).first()
+        if row:
+            row.download_limit = limit
+        else:
+            db.add(ContentDownloadLimit(message_id=message_id, download_limit=limit))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set content limit error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def try_consume_content_limit(message_id):
+    """
+    Atomically check-and-decrement a file's remaining download count.
+    Returns (allowed, remaining): remaining is None when no limit is configured
+    for this file (so the caller should treat it as unlimited).
+    """
+    db = get_db()
+    try:
+        row = db.query(ContentDownloadLimit).filter(ContentDownloadLimit.message_id == message_id).first()
+        if not row:
+            return True, None
+        if row.download_limit <= 0:
+            return False, 0
+        row.download_limit -= 1
+        remaining = row.download_limit
+        db.commit()
+        return True, remaining
+    except Exception as e:
+        db.rollback()
+        print(f"Try consume content limit error: {e}")
+        return True, None
+    finally:
+        db.close()
+
+
+def get_all_content_limits():
+    """Get all configured per-file limits as {message_id: remaining_limit}."""
+    db = get_db()
+    try:
+        rows = db.query(ContentDownloadLimit).all()
+        return {r.message_id: r.download_limit for r in rows}
+    except Exception as e:
+        print(f"Get all content limits error: {e}")
+        return {}
+    finally:
+        db.close()
+
+
+def sync_content_limits(limits_by_id):
+    """Replace all per-file limits with the given {message_id: limit} dict."""
+    db = get_db()
+    try:
+        target = {int(mid): limit for mid, limit in limits_by_id.items()}
+        existing = {r.message_id: r for r in db.query(ContentDownloadLimit).all()}
+        for mid, row in list(existing.items()):
+            if mid not in target:
+                db.delete(row)
+        for mid, limit in target.items():
+            if mid in existing:
+                existing[mid].download_limit = limit
+            else:
+                db.add(ContentDownloadLimit(message_id=mid, download_limit=limit))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Sync content limits error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+# =============================================================================
+# USER PROFILE STATS
+# =============================================================================
+
+def get_user_profile_stats(user_id):
+    """Get a user's cumulative profile stats (defaults if never recorded)."""
+    db = get_db()
+    try:
+        row = db.query(UserProfileStats).filter(UserProfileStats.user_id == user_id).first()
+        if not row:
+            return {"total_downloads": 0, "activity_score": 0, "streak_days": 0}
+        return {
+            "total_downloads": row.total_downloads,
+            "activity_score": row.activity_score,
+            "streak_days": row.streak_days,
+        }
+    except Exception as e:
+        print(f"Get user profile stats error: {e}")
+        return {"total_downloads": 0, "activity_score": 0, "streak_days": 0}
+    finally:
+        db.close()
+
+
+def record_user_download(user_id):
+    """Atomically bump a user's download/activity stats and daily streak."""
+    db = get_db()
+    try:
+        today = datetime.now().date().isoformat()
+        row = db.query(UserProfileStats).filter(UserProfileStats.user_id == user_id).first()
+        if not row:
+            row = UserProfileStats(
+                user_id=user_id, total_downloads=0, activity_score=0,
+                streak_days=1, last_active_date=today,
+            )
+            db.add(row)
+
+        if row.last_active_date != today:
+            try:
+                last_date = datetime.fromisoformat(row.last_active_date).date() if row.last_active_date else None
+            except ValueError:
+                last_date = None
+            today_date = datetime.now().date()
+            if last_date and (today_date - last_date).days == 1:
+                row.streak_days += 1
+            elif not last_date or (today_date - last_date).days > 1:
+                row.streak_days = 1
+            row.last_active_date = today
+
+        row.total_downloads += 1
+        row.activity_score += 10
+
+        daily_row = db.query(DailyStats).filter(DailyStats.date == today).first()
+        if daily_row:
+            daily_row.downloads += 1
+        else:
+            db.add(DailyStats(date=today, downloads=1))
+
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Record user download error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+RANK_TIERS = (
+    ("Legendary", 1000),
+    ("Power", 500),
+    ("Regular", 200),
+    ("Active", 50),
+    ("Beginner", 10),
+    ("New", 0),
+)
+
+
+def get_rank_info(activity_score):
+    """
+    Return rank details for an activity score: current rank name, the next
+    rank up (None if already at the top), and progress (0.0-1.0) toward it.
+    Single source of truth for rank thresholds, shared by /profile and the
+    analytics rank-distribution chart.
+    """
+    tiers_asc = list(reversed(RANK_TIERS))  # New(0) ... Legendary(1000)
+    for i, (name, threshold) in enumerate(tiers_asc):
+        next_name, next_threshold = tiers_asc[i + 1] if i + 1 < len(tiers_asc) else (None, None)
+        if next_threshold is None or activity_score < next_threshold:
+            if next_threshold is None:
+                progress = 1.0
+            else:
+                span = next_threshold - threshold
+                progress = (activity_score - threshold) / span if span > 0 else 1.0
+            return {
+                "rank": name,
+                "next_rank": next_name,
+                "progress": max(0.0, min(1.0, progress)),
+                "next_threshold": next_threshold,
+            }
+    return {"rank": "Legendary", "next_rank": None, "progress": 1.0, "next_threshold": None}
+
+
+def get_daily_downloads_range(days=14):
+    """Returns [(date_str, count), ...] for the last `days` days, oldest first, zero-filled."""
+    db = get_db()
+    try:
+        today = datetime.now().date()
+        rows = {r.date: r.downloads for r in db.query(DailyStats).all()}
+        return [
+            ((today - timedelta(days=i)).isoformat(), rows.get((today - timedelta(days=i)).isoformat(), 0))
+            for i in range(days - 1, -1, -1)
+        ]
+    except Exception as e:
+        print(f"Get daily downloads range error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_user_growth_range(days=14):
+    """
+    Returns [(date_str, new_users_count), ...] for the last `days` days, oldest
+    first, derived from each user's first_seen timestamp (no separate tracking needed).
+    """
+    db = get_db()
+    try:
+        today = datetime.now().date()
+        cutoff = today - timedelta(days=days - 1)
+        rows = db.query(User.first_seen).filter(User.first_seen.isnot(None)).all()
+        counts = {}
+        for (first_seen,) in rows:
+            d = first_seen.date()
+            if d >= cutoff:
+                counts[d.isoformat()] = counts.get(d.isoformat(), 0) + 1
+        return [
+            ((today - timedelta(days=i)).isoformat(), counts.get((today - timedelta(days=i)).isoformat(), 0))
+            for i in range(days - 1, -1, -1)
+        ]
+    except Exception as e:
+        print(f"Get user growth range error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_rank_distribution():
+    """Bucket all recorded users by activity_score into rank tiers, highest tier first."""
+    db = get_db()
+    try:
+        rows = db.query(UserProfileStats.activity_score).all()
+        counts = {name: 0 for name, _ in RANK_TIERS}
+        for (score,) in rows:
+            counts[get_rank_info(score)["rank"]] += 1
+        return counts
+    except Exception as e:
+        print(f"Get rank distribution error: {e}")
+        return {name: 0 for name, _ in RANK_TIERS}
+    finally:
+        db.close()
+
+
+def get_top_users_by_activity(limit=10):
+    """Get the top N users by activity_score, joined with their username."""
+    db = get_db()
+    try:
+        rows = (
+            db.query(UserProfileStats, User.username)
+            .join(User, User.user_id == UserProfileStats.user_id)
+            .order_by(UserProfileStats.activity_score.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "user_id": stats.user_id,
+                "username": username,
+                "activity_score": stats.activity_score,
+                "total_downloads": stats.total_downloads,
+            }
+            for stats, username in rows
+        ]
+    except Exception as e:
+        print(f"Get top users by activity error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def set_user_profile_stats(user_id, total_downloads=0, activity_score=0, streak_days=1, last_active_date=None):
+    """Directly set a user's profile stats (used for one-time legacy data import)."""
+    db = get_db()
+    try:
+        row = db.query(UserProfileStats).filter(UserProfileStats.user_id == user_id).first()
+        if row:
+            row.total_downloads = total_downloads
+            row.activity_score = activity_score
+            row.streak_days = streak_days
+            row.last_active_date = last_active_date
+        else:
+            db.add(UserProfileStats(
+                user_id=user_id, total_downloads=total_downloads, activity_score=activity_score,
+                streak_days=streak_days, last_active_date=last_active_date,
+            ))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Set user profile stats error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_user_rank_position(user_id):
+    """Get a user's 1-based rank by activity_score, or None if they have no stats yet."""
+    db = get_db()
+    try:
+        rows = db.query(UserProfileStats).order_by(UserProfileStats.activity_score.desc()).all()
+        for i, row in enumerate(rows, 1):
+            if row.user_id == user_id:
+                return i
+        return None
+    except Exception as e:
+        print(f"Get user rank position error: {e}")
+        return None
+    finally:
+        db.close()
+
+
+# =============================================================================
+# FEEDBACK & REPORTS
+# =============================================================================
+
+def add_feedback(user_id, username, name, message):
+    db = get_db()
+    try:
+        db.add(UserFeedback(user_id=user_id, username=username, name=name, message=message))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add feedback error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_recent_feedback(limit=5):
+    db = get_db()
+    try:
+        rows = db.query(UserFeedback).order_by(UserFeedback.id.desc()).limit(limit).all()
+        return [
+            {
+                "user_id": r.user_id, "username": r.username, "name": r.name,
+                "message": r.message, "created_at": r.created_at,
+            }
+            for r in reversed(rows)
+        ]
+    except Exception as e:
+        print(f"Get recent feedback error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_feedback_count():
+    db = get_db()
+    try:
+        return db.query(UserFeedback).count()
+    except Exception as e:
+        print(f"Get feedback count error: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+def add_report(user_id, username, name, issue):
+    db = get_db()
+    try:
+        db.add(UserReport(user_id=user_id, username=username, name=name, issue=issue, status="pending"))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"Add report error: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_pending_reports(limit=5):
+    db = get_db()
+    try:
+        rows = (
+            db.query(UserReport)
+            .filter(UserReport.status == "pending")
+            .order_by(UserReport.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "user_id": r.user_id, "username": r.username, "name": r.name,
+                "issue": r.issue, "created_at": r.created_at,
+            }
+            for r in reversed(rows)
+        ]
+    except Exception as e:
+        print(f"Get pending reports error: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def get_report_counts():
+    """Returns (pending_count, total_count)."""
+    db = get_db()
+    try:
+        total = db.query(UserReport).count()
+        pending = db.query(UserReport).filter(UserReport.status == "pending").count()
+        return pending, total
+    except Exception as e:
+        print(f"Get report counts error: {e}")
+        return 0, 0
+    finally:
+        db.close()
+
+
 def cleanup_blocked_users(max_age_days=30):
     """
     Clean up old blocked/deleted users.
     Optionally hard delete users who have been blocked/deleted for more than max_age_days.
     """
-    from datetime import timedelta
     db = get_db()
     try:
         cutoff_date = datetime.now() - timedelta(days=max_age_days)

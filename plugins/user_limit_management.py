@@ -5,7 +5,7 @@
 import asyncio
 
 from bot import Bot
-from config import ADMINS, LOGGER
+from config import LOGGER, admin_filter
 from pyrogram import filters
 from pyrogram.types import Message
 
@@ -20,23 +20,25 @@ from .user_limits import (
     get_all_user_custom_limits,
     get_user_custom_limit
 )
+from .stats_utils import make_bar
 
-@Bot.on_message(filters.command("setlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setlimit") & admin_filter)
 async def set_daily_download_limit(client: Bot, message: Message):
     """Set daily download limit for all users"""
     if len(message.command) != 2:
         await message.reply_text(
             "❌ <b>Penggunaan:</b> /setlimit JUMLAH\n\n"
-            "<b>Contoh:</b> /setlimit 5\n\n"
+            "<b>Contoh:</b> /setlimit 5\n"
+            "<b>Untuk nonaktifkan download:</b> /setlimit 0\n\n"
             f"<b>Limit saat ini:</b> {get_daily_limit_config()} kali per hari",
             quote=True
         )
         return
-    
+
     try:
         new_limit = int(message.command[1])
-        if new_limit < 1 or new_limit > 50:
-            await message.reply_text("❌ <b>Limit harus antara 1-50!</b>", quote=True)
+        if new_limit < 0 or new_limit > 50:
+            await message.reply_text("❌ <b>Limit harus antara 0-50! (0 = nonaktifkan download)</b>", quote=True)
             return
         
         old_limit = get_daily_limit_config()
@@ -56,7 +58,7 @@ async def set_daily_download_limit(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("getlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getlimit") & admin_filter)
 async def get_daily_limit(client: Bot, message: Message):
     """Get current daily download limit"""
     try:
@@ -75,14 +77,15 @@ async def get_daily_limit(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("setuserlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("setuserlimit") & admin_filter)
 async def set_user_custom_limit_cmd(client: Bot, message: Message):
     """Set custom daily limit for specific user"""
     if len(message.command) != 3:
         await message.reply_text(
             "❌ <b>Penggunaan:</b> /setuserlimit USER_ID LIMIT\n\n"
             "<b>Contoh:</b> /setuserlimit 123456789 10\n"
-            "<b>Untuk unlimited:</b> /setuserlimit 123456789 999",
+            "<b>Untuk unlimited:</b> /setuserlimit 123456789 999\n"
+            "<b>Untuk blokir user ini:</b> /setuserlimit 123456789 0",
             quote=True
         )
         return
@@ -91,8 +94,8 @@ async def set_user_custom_limit_cmd(client: Bot, message: Message):
         user_id = int(message.command[1])
         new_limit = int(message.command[2])
 
-        if new_limit < 1 or new_limit > 1000:
-            await message.reply_text("❌ <b>Limit harus antara 1-1000!</b>", quote=True)
+        if new_limit < 0 or new_limit > 1000:
+            await message.reply_text("❌ <b>Limit harus antara 0-1000! (0 = blokir user ini)</b>", quote=True)
             return
 
         old_limit = get_user_custom_limit(user_id)
@@ -113,7 +116,7 @@ async def set_user_custom_limit_cmd(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("deluserlimit") & filters.user(ADMINS))
+@Bot.on_message(filters.command("deluserlimit") & admin_filter)
 async def delete_user_custom_limit_cmd(client: Bot, message: Message):
     """Delete custom limit for specific user (fallback to global)"""
     if len(message.command) != 2:
@@ -152,7 +155,7 @@ async def delete_user_custom_limit_cmd(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("getuserlimits") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getuserlimits") & admin_filter)
 async def get_user_custom_limits_cmd(client: Bot, message: Message):
     """Get all users with custom limits"""
     try:
@@ -185,55 +188,55 @@ async def get_user_custom_limits_cmd(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("userstats") & filters.user(ADMINS))
+@Bot.on_message(filters.command("userstats") & admin_filter)
 async def get_user_statistics(client: Bot, message: Message):
     """Get user download statistics"""
+    msg = await message.reply_text("<code>Mengambil statistik user...</code>", quote=True)
     try:
-        await message.reply_text("<code>Mengambil statistik user...</code>", quote=True)
-        
         # Get user statistics
         user_stats = get_all_user_stats()
-        
+
         if not user_stats:
-            await message.edit_text("❌ <b>Belum ada data download user!</b>")
+            await msg.edit_text("❌ <b>Belum ada data download user hari ini!</b>")
             return
-        
+
         # Sort by download count (highest first)
         user_stats.sort(key=lambda x: x['today_downloads'], reverse=True)
-        
+
         # Build statistics message
         stats_lines = []
-        stats_lines.append("📊 <b>USER DOWNLOAD STATISTICS</b>")
+        stats_lines.append("📊 <b>USER DOWNLOAD STATISTICS (Hari Ini)</b>")
         stats_lines.append(f"<b>Total Users Active:</b> {len(user_stats)}")
-        stats_lines.append(f"<b>Daily Limit:</b> {user_stats[0]['daily_limit']} downloads")
+        stats_lines.append(f"<b>Daily Limit Global:</b> {user_stats[0]['daily_limit']} downloads")
         stats_lines.append("")
-        
+
         # Show top 20 users
         for i, stat in enumerate(user_stats[:20], 1):
             user_id = stat['user_id']
             downloads = stat['today_downloads']
             limit = stat['daily_limit']
             remaining = stat['remaining']
-            
+
             status = "🔴" if remaining <= 0 else "🟡" if remaining <= 1 else "🟢"
-            
+            usage_bar = make_bar(downloads / limit if limit else 0, length=8)
+
             stats_lines.append(
-                f"{status} <b>{i}.</b> User {user_id}\n"
-                f"   Downloads: {downloads}/{limit} (Sisa: {remaining})"
+                f"{status} <b>{i}.</b> User <code>{user_id}</code>\n"
+                f"   <code>{usage_bar}</code> {downloads}/{limit} (Sisa: {remaining})"
             )
-        
+
         if len(user_stats) > 20:
             stats_lines.append(f"\n📝 ...dan {len(user_stats) - 20} user lainnya")
-        
+
         stats_text = "\n".join(stats_lines)
-        
-        await message.edit_text(stats_text)
-        
+
+        await msg.edit_text(stats_text)
+
     except Exception as e:
         LOGGER(__name__).error(e)
-        await message.edit_text(f"❌ <b>Error:</b> `{e}`")
+        await msg.edit_text(f"❌ <b>Error:</b> `{e}`")
 
-@Bot.on_message(filters.command("resetlimits") & filters.user(ADMINS))
+@Bot.on_message(filters.command("resetlimits") & admin_filter)
 async def reset_user_limits(client: Bot, message: Message):
     """Reset all user daily limits"""
     try:
@@ -275,7 +278,7 @@ async def reset_user_limits(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("checkuser") & filters.user(ADMINS))
+@Bot.on_message(filters.command("checkuser") & admin_filter)
 async def check_user_limit(client: Bot, message: Message):
     """Check specific user limit status"""
     if len(message.command) != 2:

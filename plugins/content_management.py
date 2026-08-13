@@ -5,14 +5,14 @@
 import asyncio
 
 from bot import Bot
-from config import ADMINS, LOGGER, OWNER
+from config import LOGGER, OWNER, admin_filter
 from pyrogram import filters
 from pyrogram.types import Message
 
 # Import utility functions for content protection
 from .content_utils import load_content_settings, save_content_settings, add_protected_file, remove_protected_file, set_file_limit
 
-@Bot.on_message(filters.command("addkonten") & filters.user(ADMINS))
+@Bot.on_message(filters.command("addkonten") & admin_filter)
 async def add_content(client: Bot, message: Message):
     """Tambahkan file/konten ke protected list"""
     if len(message.command) != 2:
@@ -41,7 +41,7 @@ async def add_content(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("delkonten") & filters.user(ADMINS))
+@Bot.on_message(filters.command("delkonten") & admin_filter)
 async def del_content(client: Bot, message: Message):
     """Hapus file dari protected list"""
     if len(message.command) != 2:
@@ -70,7 +70,7 @@ async def del_content(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("getkonten") & filters.user(ADMINS))
+@Bot.on_message(filters.command("getkonten") & admin_filter)
 async def get_content(client: Bot, message: Message):
     """Lihat daftar protected content"""
     try:
@@ -100,7 +100,7 @@ async def get_content(client: Bot, message: Message):
         LOGGER(__name__).error(e)
         await message.reply_text(f"❌ <b>Error:</b> `{e}`", quote=True)
 
-@Bot.on_message(filters.command("limitkonten") & filters.user(ADMINS))
+@Bot.on_message(filters.command("limitkonten") & admin_filter)
 async def limit_content(client: Bot, message: Message):
     """Set limit untuk konten tertentu"""
     if len(message.command) != 3:

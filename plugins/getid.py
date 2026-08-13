@@ -159,10 +159,12 @@ async def user_stats(client, message):
     try:
         user = message.from_user
 
-        # Get user count from database
-        from database.sql import full_userbase
+        # Get user count and today's activity from database
+        from database.sql import full_userbase, get_user_stats as get_db_user_stats, get_daily_downloads_range
         users = await full_userbase()
         total_users = len(users)
+        db_stats = get_db_user_stats()
+        downloads_today = get_daily_downloads_range(days=1)[0][1]
 
         # Get bot uptime
         from plugins.start import START_TIME
@@ -172,28 +174,27 @@ async def user_stats(client, message):
 
         days = uptime.days
         hours, remainder = divmod(uptime.seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
+        minutes, _ = divmod(remainder, 60)
 
-        stats = f"""
-<b>📊 BOT STATISTICS</b>
+        stats = f"""<b>📊 BOT STATISTICS</b>
 
-<b>👥 User Stats:</b>
+<b>👥 Community</b>
 ├ <b>Total Users:</b> {total_users:,}
-├ <b>Your ID:</b> <code>{user.id}</code>
-├ <b>Username:</b> @{user.username if user.username else "None"}
-└ <b>Language:</b> {user.language_code if user.language_code else "Unknown"}
+├ <b>Active Today:</b> {db_stats.get('active_today', 0):,}
+└ <b>Downloads Today:</b> {downloads_today:,} 📥
 
-<b>⏰ Bot Uptime:</b>
-├ <b>Days:</b> {days}
-├ <b>Hours:</b> {hours}
-├ <b>Minutes:</b> {minutes}
-└ <b>Seconds:</b> {seconds}
+<b>👤 Kamu</b>
+├ <b>ID:</b> <code>{user.id}</code>
+└ <b>Username:</b> @{user.username if user.username else "None"}
 
-<b>🤖 Bot Info:</b>
+<b>⏰ Bot Uptime</b>
+└ <code>{days} hari {hours} jam {minutes} menit</code>
+
+<b>🤖 Bot Info</b>
 ├ <b>Username:</b> @{client.username}
-├ <b>Name:</b> {client.namebot}
-└ <b>Version:</b> 4.0.0 Enhanced
-"""
+└ <b>Name:</b> {client.namebot}
+
+💡 <i>Lihat statistik pribadimu lebih lengkap dengan /profile</i>"""
 
         await message.reply_text(stats, quote=True)
 

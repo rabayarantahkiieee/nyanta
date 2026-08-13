@@ -6,11 +6,11 @@ import asyncio
 from datetime import datetime
 
 from bot import Bot
-from config import ADMINS, OWNER, LOGGER, CHANNEL_ID
+from config import ADMINS, OWNER, LOGGER, CHANNEL_ID, admin_filter
 from pyrogram import filters
 from pyrogram.types import Message
 
-@Bot.on_message(filters.command("info") & filters.private & filters.user(ADMINS))
+@Bot.on_message(filters.command("info") & filters.private & admin_filter)
 async def bot_info(client: Bot, message: Message):
     """ Informasi lengkap tentang bot """
     try:

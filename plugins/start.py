@@ -19,8 +19,9 @@ from config import (
     FORCE_MSG,
     PROTECT_CONTENT,
     START_MSG,
+    admin_filter,
 )
-from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info
+from database.sql import add_user, delete_user, full_userbase, query_msg, update_user_subscription_status, sync_user_activity, mark_user_blocked, get_user_stats as get_db_user_stats, get_user_join_info, record_user_download, get_daily_downloads_range, get_top_users_by_activity, get_rank_info
 from pyrogram import filters
 from pyrogram.enums import ParseMode
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked
@@ -30,7 +31,10 @@ from config import decode, get_messages, subsall, subsch, subsgc
 
 from .button import fsub_button, start_button
 from .content_utils import check_content_protection
+from .stats_utils import make_bar, rank_emoji
 from .user_limits import check_user_daily_limit, get_user_stats
+from .verification import require_verification_or_prompt
+from .i18n import t
 
 # Setup logging for broadcast system
 logger = logging.getLogger(__name__)
@@ -277,32 +281,32 @@ async def get_broadcast_message_type(broadcast_msg):
     if broadcast_msg.photo:
         broadcast_data["type"] = "photo"
         broadcast_data["media_id"] = broadcast_msg.photo.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.video:
         broadcast_data["type"] = "video"
         broadcast_data["media_id"] = broadcast_msg.video.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.document:
         broadcast_data["type"] = "document"
         broadcast_data["media_id"] = broadcast_msg.document.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.audio:
         broadcast_data["type"] = "audio"
         broadcast_data["media_id"] = broadcast_msg.audio.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.voice:
         broadcast_data["type"] = "voice"
         broadcast_data["media_id"] = broadcast_msg.voice.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.animation:
         broadcast_data["type"] = "animation"
         broadcast_data["media_id"] = broadcast_msg.animation.file_id
-        broadcast_data["caption"] = broadcast_msg.caption or ""
+        broadcast_data["caption"] = broadcast_msg.caption.html if broadcast_msg.caption else ""
 
     elif broadcast_msg.sticker:
         broadcast_data["type"] = "sticker"
@@ -314,7 +318,7 @@ async def get_broadcast_message_type(broadcast_msg):
 
     elif broadcast_msg.text is not None:
         broadcast_data["type"] = "text"
-        broadcast_data["content"] = broadcast_msg.text
+        broadcast_data["content"] = broadcast_msg.text.html
 
     else:
         return None  # Unsupported type
@@ -423,12 +427,6 @@ try:
 except ImportError:
     BUTTONS_AVAILABLE = False
 
-try:
-    from .user_features import update_user_activity, save_user_data, load_user_data
-    USER_TRACKING_AVAILABLE = True
-except ImportError:
-    USER_TRACKING_AVAILABLE = False
-
 def get_custom_buttons():
     """Get custom buttons for download"""
     if not BUTTONS_AVAILABLE:
@@ -463,22 +461,9 @@ def get_custom_buttons():
         return []
 
 def update_user_tracking(user_id):
-    """Update user activity and stats"""
-    if not USER_TRACKING_AVAILABLE:
-        return
-    
+    """Update user profile stats (total downloads, activity score, streak) for a successful download."""
     try:
-        user_data = load_user_data()
-        update_user_activity(user_id, user_data)
-        
-        # Update activity score and downloads
-        user_stats = user_data.get(str(user_id), {})
-        user_stats['total_downloads'] = user_stats.get('total_downloads', 0) + 1
-        user_stats['downloads_today'] = user_stats.get('downloads_today', 0) + 1
-        user_stats['activity_score'] = user_stats.get('activity_score', 0) + 10
-        
-        user_data[str(user_id)] = user_stats
-        save_user_data(user_data)
+        record_user_download(user_id)
     except Exception as e:
         print(f"Error updating user tracking: {e}")
 
@@ -525,6 +510,8 @@ async def start_command(client: Bot, message: Message):
             base64_string = text.split(" ", 1)[1]
         except BaseException:
             return
+        if not await require_verification_or_prompt(client, message, base64_string):
+            return
         string = await decode(base64_string)
         argument = string.split("-")
         if len(argument) == 3:
@@ -548,7 +535,7 @@ async def start_command(client: Bot, message: Message):
                 ids = [int(int(argument[1]) / abs(client.db_channel.id))]
             except BaseException:
                 return
-        temp_msg = await message.reply("<code>Tunggu Sebentar...</code>")
+        temp_msg = await message.reply(f"<code>{t(message.from_user.id, 'please_wait')}</code>")
         try:
             messages = await get_messages(client, ids)
         except BaseException:
@@ -556,13 +543,13 @@ async def start_command(client: Bot, message: Message):
             sent = await send_custom_message(client, message.from_user.id, "error", quote=True)
             if not sent:
                 # Fallback to default message
-                await message.reply_text("<b>Telah Terjadi Error </b>🥺")
+                await message.reply_text(t(message.from_user.id, "error_generic"))
             return
         await temp_msg.delete()
 
         # Initialize limit message sent flag for this download attempt
         limit_message_sent = False
-        
+
         for msg in messages:
             # Check user daily limit first
             is_allowed = check_user_daily_limit(message.from_user.id)
@@ -573,10 +560,10 @@ async def start_command(client: Bot, message: Message):
                     sent = await send_custom_message(client, message.from_user.id, "limit", quote=True)
                     if not sent:
                         # Fallback to default message
-                        await message.reply_text("X LIMIT HARIAN HABIS!\n\nAnda sudah mencapai batas download harian.\nCoba lagi besok!", quote=True)
+                        await message.reply_text(t(message.from_user.id, "limit_exceeded"), quote=True)
                     limit_message_sent = True
                 continue
-            
+
             # Check content protection before sending
             is_allowed, content_msg = check_content_protection(msg.id, message.from_user.id)
 
@@ -586,7 +573,7 @@ async def start_command(client: Bot, message: Message):
                     sent = await send_custom_message(client, message.from_user.id, "protected", quote=True)
                     if not sent:
                         # Fallback to default message
-                        await message.reply_text("X LIMIT DOWNLOAD HABIS!\n\nKonten ini sudah mencapai batas download maksimal.", quote=True)
+                        await message.reply_text(t(message.from_user.id, "protected_limit_exceeded"), quote=True)
                 else:
                     # For other content messages (like remaining limit info)
                     await message.reply_text(content_msg, quote=True)
@@ -605,7 +592,8 @@ async def start_command(client: Bot, message: Message):
 
             # Build custom buttons if available
             custom_buttons = get_custom_buttons()
-            
+
+            reply_markup = None
             if custom_buttons:
                 reply_markup = InlineKeyboardMarkup(custom_buttons)
             elif not DISABLE_CHANNEL_BUTTON:
@@ -613,7 +601,13 @@ async def start_command(client: Bot, message: Message):
             
             # Add daily limit info to caption
             user_stats = get_user_stats(message.from_user.id)
-            daily_info = f"Limit harian: {user_stats['today_downloads']}/{user_stats['daily_limit']} (Sisa: {user_stats['remaining']})"
+            daily_info = t(
+                message.from_user.id,
+                "daily_info",
+                used=user_stats["today_downloads"],
+                limit=user_stats["daily_limit"],
+                remaining=user_stats["remaining"],
+            )
             caption = f"{caption}\n\n{daily_info}" if caption else daily_info
             
             # Add content limit info to caption if content is limited
@@ -630,7 +624,7 @@ async def start_command(client: Bot, message: Message):
                 )
                 await asyncio.sleep(0.5)
             except FloodWait as e:
-                await asyncio.sleep(e.x)
+                await asyncio.sleep(e.value)
                 await msg.copy(
                     chat_id=message.from_user.id,
                     caption=caption,
@@ -681,31 +675,51 @@ async def not_joined(client: Bot, message: Message):
     )
 
 
-@Bot.on_message(filters.command(["users", "stats"]) & filters.user(ADMINS))
+@Bot.on_message(filters.command("users") & admin_filter)
 async def get_users(client: Bot, message: Message):
     msg = await client.send_message(
         chat_id=message.chat.id, text="<code>Processing ...</code>"
     )
     users = await full_userbase(include_inactive=False)  # Only active users
     stats = get_db_user_stats()
+    downloads_today = get_daily_downloads_range(days=1)[0][1]
+    active_fraction = (stats['active_users'] / stats['total_users']) if stats['total_users'] else 0
 
-    stats_text = f"""
-<b>📊 BOT STATISTICS</b>
+    top_users = get_top_users_by_activity(limit=3)
+    if top_users:
+        medals = ["🥇", "🥈", "🥉"]
+        leaderboard = "\n".join(
+            f"{medals[i]} {rank_emoji(get_rank_info(u['activity_score'])['rank'])} "
+            f"@{u['username'] or u['user_id']} — {u['activity_score']:,} pts"
+            for i, u in enumerate(top_users)
+        )
+    else:
+        leaderboard = "<i>Belum ada data aktivitas user</i>"
 
-<b>👥 Total Users:</b> {stats['total_users']:,}
-<b>🔥 Active Users:</b> {stats['active_users']:,}
-<b>🚫 Blocked:</b> {stats['blocked_users']:,}
-<b>🗑️ Deleted:</b> {stats['deleted_users']:,}
-<b>🔥 Active Today:</b> {stats['active_today']}
+    stats_text = f"""<b>📊 BOT STATISTICS</b>
+
+<b>👥 User Breakdown</b>
+├ <b>Total:</b> {stats['total_users']:,}
+├ <b>Active:</b> <code>{make_bar(active_fraction)}</code> {stats['active_users']:,} ({active_fraction*100:.0f}%)
+├ <b>Blocked:</b> {stats['blocked_users']:,}
+└ <b>Deleted:</b> {stats['deleted_users']:,}
+
+<b>📈 Activity</b>
+├ <b>Active Today:</b> {stats['active_today']:,}
+└ <b>Downloads Today:</b> {downloads_today:,} 📥
+
+<b>🏆 Top Activity</b>
+{leaderboard}
 
 <b>💾 Database:</b> {'PostgreSQL' if 'postgresql' in DB_URI else 'SQLite'}
 <b>🔄 Status:</b> Active & Persistent
-"""
+
+💡 <i>Grafik lengkap: /analytics</i>"""
 
     await msg.edit(stats_text)
 
 
-@Bot.on_message(filters.command("broadcast") & filters.user(ADMINS))
+@Bot.on_message(filters.command("broadcast") & admin_filter)
 async def send_text(client: Bot, message: Message):
     """
     Enhanced broadcast function with batch processing, concurrency control, and comprehensive error handling.
@@ -725,7 +739,8 @@ async def send_text(client: Bot, message: Message):
             msg = await message.reply(
                 "<code>❌ Gunakan perintah ini dengan reply ke pesan yang ingin di-broadcast!</code>\n\n"
                 "<b>📱 Supported Media:</b> Text, Photo, Video, Document, Audio, Voice, Animation, Sticker, Video Note\n"
-                "<b>🎨 HTML Support:</b> <code><b></code>, <code><i></code>, <code><blockquote></code>, <code>\\n</code>\n"
+                "<b>🎨 Formatting:</b> Bold/italic/blockquote/dll otomatis kepakai persis kayak pesan yang di-reply "
+                "(gak perlu ngetik tag <code><b></code>/<code><i></code> manual) — cukup format teksnya di Telegram lalu reply pesannya\n"
                 "<b>🔘 Button Markup:</b> <code>[Button Text](Button URL)</code>\n"
                 "<code>[Btn1](URL1) && [Btn2](URL2)</code> untuk 2 buttons per row\n"
                 "<b>📊 Placeholder Variables:</b>\n"
@@ -800,27 +815,36 @@ async def send_text(client: Bot, message: Message):
     # Check if message contains placeholders
     has_placeholders = check_placeholders(broadcast_data.get("caption", "")) or check_placeholders(broadcast_data.get("content"))
     
-    # Get configuration values
-    delay = 0.15 if has_placeholders else 0.05
+    # Get configuration values (base/floor values for adaptive throttling below)
+    base_delay = 0.15 if has_placeholders else 0.05
     batch_size = 10  # Process in batches
-    max_concurrent = 5  # Maximum concurrent tasks
-    
+    base_max_concurrent = 5  # Maximum concurrent tasks
+    max_delay = 3.0  # Hard cap so a bad run can't stall forever
+    min_concurrent = 1
+
+    # Adaptive throttling state: tightened when FloodWaits spike, relaxed
+    # again once the send rate looks healthy. Protects large broadcasts
+    # from cascading into repeated global FloodWaits instead of just
+    # retrying the same burst rate forever.
+    current_delay = base_delay
+    current_max_concurrent = base_max_concurrent
+
     # Update initial status
     await update_progress_message(pls_wait, 0, 0, 0, 0, 0, 0)
-    
+
     logger.info(f"Starting enhanced broadcast to {len(user_ids)} users | Type: {broadcast_data['type']} | Has placeholders: {has_placeholders}")
-    
+
     # Process users in batches
     for i in range(0, len(user_ids), batch_size):
         batch = user_ids[i:i + batch_size]
-        
+
         # Create tasks for this batch
         tasks = []
         for chat_id in batch:
             # Skip admins
             if chat_id in ADMINS:
                 continue
-            
+
             tasks.append(send_broadcast_to_user(
                 client=client,
                 chat_id=chat_id,
@@ -828,16 +852,17 @@ async def send_text(client: Bot, message: Message):
                 has_placeholders=has_placeholders,
                 max_retries=max_retries
             ))
-        
+
         # Process batch with concurrency control
         if tasks:
-            # Process tasks in chunks to respect max_concurrent
-            for j in range(0, len(tasks), max_concurrent):
-                chunk = tasks[j:j + max_concurrent]
-                
+            # Process tasks in chunks to respect the current concurrency limit
+            batch_flood_waits = 0
+            for j in range(0, len(tasks), current_max_concurrent):
+                chunk = tasks[j:j + current_max_concurrent]
+
                 # Execute chunk concurrently
                 results = await asyncio.gather(*chunk, return_exceptions=True)
-                
+
                 # Process results
                 for result in results:
                     if isinstance(result, Exception):
@@ -848,22 +873,39 @@ async def send_text(client: Bot, message: Message):
                             deleted += 1
                         elif isinstance(result, FloodWait):
                             flood_waits += 1
+                            batch_flood_waits += 1
                         else:
                             unsuccessful += 1
-                        
+
                         logger.error(f"Broadcast error: {str(result)}")
                     else:
                         # Successful result
                         successful += 1
-                    
+
                     total += 1
-                    
+
                     # Update progress every 10 users
                     if total % 10 == 0:
                         await update_progress_message(pls_wait, total, successful, unsuccessful, blocked, deleted, flood_waits)
-                
+
                 # Rate limiting
-                await asyncio.sleep(delay)
+                await asyncio.sleep(current_delay)
+
+            # Adapt pacing for the NEXT batch based on how this one went.
+            # >10% of this batch hitting FloodWait: back off (slower + less
+            # concurrent). Otherwise, if we'd previously backed off and this
+            # batch was clean, ease back toward the baseline pace.
+            batch_flood_rate = batch_flood_waits / len(tasks) if tasks else 0
+            if batch_flood_rate > 0.1:
+                current_delay = min(max_delay, current_delay * 2)
+                current_max_concurrent = max(min_concurrent, current_max_concurrent - 1)
+                logger.warning(
+                    f"Broadcast throttling engaged: {batch_flood_waits}/{len(tasks)} FloodWaits in batch. "
+                    f"delay={current_delay:.2f}s concurrency={current_max_concurrent}"
+                )
+            elif batch_flood_waits == 0 and (current_delay > base_delay or current_max_concurrent < base_max_concurrent):
+                current_delay = max(base_delay, current_delay * 0.7)
+                current_max_concurrent = min(base_max_concurrent, current_max_concurrent + 1)
     
     # Send final report
     await send_final_report(pls_wait, message, total, successful, unsuccessful, blocked, deleted, flood_waits, broadcast_data["type"])
@@ -993,21 +1035,6 @@ async def send_broadcast_to_user(client, chat_id, broadcast_data, has_placeholde
     logger.error(error_msg)
     log_broadcast_error(chat_id, "MAX_RETRIES_EXCEEDED", error_msg, max_retries)
     return last_error if last_error else Exception("Unknown error")
-
-
-@Bot.on_message(filters.command("ping"))
-async def ping_pong(client, m: Message):
-    start = time()
-    current_time = datetime.utcnow()
-    uptime_sec = (current_time - START_TIME).total_seconds()
-    uptime = await _human_time_duration(int(uptime_sec))
-    m_reply = await m.reply_text("Pinging...")
-    delta_ping = time() - start
-    await m_reply.edit_text(
-        "<b>PONG!!</b>🏓 \n"
-        f"<b>• Pinger -</b> <code>{delta_ping * 1000:.3f}ms</code>\n"
-        f"<b>• Uptime -</b> <code>{uptime}</code>\n"
-    )
 
 
 @Bot.on_message(filters.command("uptime"))

@@ -21,22 +21,38 @@ from pyrogram.types import InlineKeyboardButton
 load_dotenv(".env")
 
 # =============================================================================
-# ADMIN MANAGEMENT FUNCTIONS
+# ADMIN MANAGEMENT
 # =============================================================================
+#
+# ADMINS is a single shared list, mutated in place (never reassigned) by
+# /addadmin and /deladmin so every already-created `admin_filter` below sees
+# the change immediately. Dynamically-added admins persist in the database;
+# only the base list from the ADMINS env var is fixed at startup.
+#
+# IMPORTANT: admin-only handlers must use `admin_filter` from this module,
+# NOT `pyrogram.filters.user(ADMINS)`. Pyrogram's filters.user() copies its
+# argument into an immutable set at decoration time, so it would keep
+# checking against whatever ADMINS looked like when the bot started - a
+# newly added (or removed) admin wouldn't take effect until a restart.
 
-ADMIN_FILE = "admin_list.json"
+from database.sql import get_all_admin_ids, add_admin_db, remove_admin_db
 
-def load_admins():
-    """Load admin list from file"""
-    if os.path.exists(ADMIN_FILE):
-        with open(ADMIN_FILE, 'r') as f:
-            return json.load(f)
-    return []
+_LEGACY_ADMIN_FILE = "admin_list.json"
 
-def save_admins(admins):
-    """Save admin list to file"""
-    with open(ADMIN_FILE, 'w') as f:
-        json.dump(admins, f)
+
+def _migrate_legacy_admin_file_if_needed():
+    """One-time import of data from the old admin_list.json into the database."""
+    if not os.path.exists(_LEGACY_ADMIN_FILE):
+        return
+    try:
+        with open(_LEGACY_ADMIN_FILE, "r") as f:
+            legacy_admins = json.load(f)
+        for user_id in legacy_admins:
+            add_admin_db(int(user_id))
+        os.rename(_LEGACY_ADMIN_FILE, _LEGACY_ADMIN_FILE + ".migrated")
+        print("[INFO] Migrated admin_list.json into the database")
+    except Exception as e:
+        print(f"[WARNING] Failed to migrate legacy admin_list.json: {e}")
 
 # Bot token dari @Botfather
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
@@ -56,13 +72,9 @@ OWNER = os.environ.get("OWNER", "")
 # Protect Content
 PROTECT_CONTENT = strtobool(os.environ.get("PROTECT_CONTENT", "False"))
 
-# Heroku Credentials for updater.
+# Heroku/Sevalla app identity (shown in /vars)
 HEROKU_APP_NAME = os.environ.get("HEROKU_APP_NAME", None)
 HEROKU_API_KEY = os.environ.get("HEROKU_API_KEY", None)
-
-# Custom Repo for updater.
-UPSTREAM_BRANCH = os.environ.get("UPSTREAM_BRANCH", "master")
-UPSTREAM_REPO = os.environ.get("UPSTREAM_REPO", "https://github.com/mrismanaziz/File-Sharing-Man.git")
 
 # Database
 DB_URI = os.environ.get("DATABASE_URL", "sqlite:///bot_database.db")
@@ -82,10 +94,21 @@ START_MSG = os.environ.get(
     "START_MESSAGE",
     "<b>Hello {first}</b>\n\n<b>Saya dapat menyimpan file pribadi di Channel Tertentu dan pengguna lain dapat mengaksesnya dari link khusus.</b>",
 )
+_migrate_legacy_admin_file_if_needed()
+
 try:
-    ADMINS = [int(x) for x in (os.environ.get("ADMINS", "").split())] + load_admins()
+    ADMINS = [int(x) for x in (os.environ.get("ADMINS", "").split())] + get_all_admin_ids()
 except ValueError:
     raise Exception("Daftar Admin Anda tidak berisi User ID Telegram yang valid.")
+
+
+async def _is_admin(_, __, message):
+    return bool(message.from_user and message.from_user.id in ADMINS)
+
+
+# Use this instead of filters.user(ADMINS) for admin-only handlers - see the
+# note above ADMIN MANAGEMENT for why filters.user(ADMINS) doesn't work here.
+admin_filter = filters.create(_is_admin)
 
 # Pesan Saat Memaksa Subscribe
 FORCE_MSG = os.environ.get(
@@ -146,12 +169,14 @@ class Data:
  ├ /help - Bantuan Perintah Bot ini
  ├ /id - Lihat informasi profile lengkap
  ├ /profile - Lihat profil & statistik pengguna
+ ├ /stats - Lihat statistik ringkas bot
  ├ /ping - Untuk mengecek bot hidup
  ├ /uptime - Untuk melihat status bot
+ ├ /search - Cari file berdasarkan nama (juga via <code>@botusername keyword</code>)
+ ├ /language - Ganti bahasa pesan inti (ID/EN)
  ├ /feedback - Kirim feedback ke developer
  ├ /report - Laporkan masalah atau bug
- ├ /tutorial - Panduan lengkap penggunaan bot
- ├ /stats - Lihat statistik bot (alias /users)
+ └ /tutorial - Panduan lengkap penggunaan bot
 
 <b> ❏ Perintah Untuk Admin BOT</b>
  ├ <b>📁 File Management</b>
@@ -165,29 +190,25 @@ class Data:
  ├
  ├ <b>💾 Database Management</b>
  ├ /getdb - Informasi database
- ├ /setdb - Set database configuration
+ ├ /setdb - Set DATABASE_URL via Sevalla
  ├ /backupdb - Backup database
  ├ /restoredb - Restore database dari backup
- ├ /cleardb - Clear database (DANGER!)
+ ├ /cleardb - Kosongkan data user (DANGER!)
  ├
  ├ <b>⚙️ System Management</b>
  ├ /logs - Untuk melihat logs bot
  ├ /vars - Lihat semua config variables
  ├ /info - Informasi lengkap bot & statistik
  ├ /speedtest - Test kecepatan server
- ├ /users - Statistik pengguna bot
+ ├ /users - Statistik pengguna bot (detail)
+ ├ /analytics - Dashboard analytics visual (grafik)
  ├ /broadcast - Kirim pesan broadcast
  ├
- ├ <b>🔄 Bot Management</b>
- ├ /update - Update bot dari GitHub
- ├ /restart - Restart bot
- ├ /pull - Pull update tanpa restart
- ├
- ├ <b>🌐 Heroku Management</b>
+ ├ <b>🌐 Sevalla/Heroku Management</b>
  ├ /setvar - Set environment variables
  ├ /delvar - Hapus environment variables
  ├ /getvar - Lihat environment variables
- └ /usage - Monitoring aplikasi Heroku
+ └ /usage - Monitoring aplikasi Sevalla
 
 <b> ❏ Content & Button Management (Admin)</b>
  ├ /addbutton - Tambahkan custom button
@@ -199,6 +220,20 @@ class Data:
  ├ /delkonten - Hapus file dari protected list
  ├ /getkonten - Lihat daftar protected content
  └ /limitkonten - Set limit untuk konten tertentu
+
+<b> ❏ User Limit Management (Admin)</b>
+ ├ /setlimit - Set limit download harian global (0 = nonaktifkan)
+ ├ /getlimit - Lihat limit harian saat ini
+ ├ /setuserlimit - Set limit custom per user (0 = blokir user ini)
+ ├ /deluserlimit - Hapus limit custom user
+ ├ /getuserlimits - Lihat semua custom limit
+ ├ /userstats - Statistik download semua user
+ ├ /resetlimits - Reset semua limit user
+ └ /checkuser - Cek status limit user tertentu
+
+<b> ❏ Anti-Leech Verification (Admin)</b>
+ ├ /setverify - Aktifkan/nonaktifkan verifikasi anti-leech
+ └ /setverifydelay - Atur delay verifikasi (detik)
 
 <b> ❏ Admin Feedback Management</b>
  ├ /viewfeedback - Lihat feedback dari pengguna
@@ -368,7 +403,7 @@ async def get_messages(client, message_ids):
                 chat_id=client.db_channel.id, message_ids=temb_ids
             )
         except FloodWait as e:
-            await asyncio.sleep(e.x)
+            await asyncio.sleep(e.value)
             msgs = await client.get_messages(
                 chat_id=client.db_channel.id, message_ids=temb_ids
             )

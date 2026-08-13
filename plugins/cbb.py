@@ -9,12 +9,18 @@ from pyrogram import filters
 from pyrogram.errors import MessageNotModified
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
+from .i18n import t
+
+
+def build_about_text(user_id, username):
+    return f"<b>{t(user_id, 'about_title')}</b>\n\n{t(user_id, 'about_body', username=username, owner=OWNER)}"
+
 
 @Bot.on_message(filters.private & filters.incoming & filters.command("about"))
 async def _about(client: Bot, msg: Message):
     await client.send_message(
         msg.chat.id,
-        Data.ABOUT.format(client.username, OWNER),
+        build_about_text(msg.from_user.id, client.username),
         reply_markup=InlineKeyboardMarkup(Data.mbuttons),
     )
 
@@ -34,7 +40,7 @@ async def cb_handler(client: Bot, query: CallbackQuery):
     if data == "about":
         try:
             await query.message.edit_text(
-                text=Data.ABOUT.format(client.username, OWNER),
+                text=build_about_text(query.from_user.id, client.username),
                 reply_markup=InlineKeyboardMarkup(Data.mbuttons),
             )
         except MessageNotModified:

@@ -21,12 +21,13 @@ from config import (
     PROTECT_CONTENT,
     START_MSG,
     TG_BOT_TOKEN,
+    admin_filter,
 )
 from pyrogram import filters
 from pyrogram.types import Message
 
 
-@Bot.on_message(filters.command("logs") & filters.user(ADMINS))
+@Bot.on_message(filters.command("logs") & admin_filter)
 async def get_bot_logs(client: Bot, m: Message):
     bot_log_path = "logs.txt"
     if os.path.exists(bot_log_path):
@@ -43,7 +44,7 @@ async def get_bot_logs(client: Bot, m: Message):
         await m.reply_text("❌ <b>Tidak ada log yang ditemukan!</b>")
 
 
-@Bot.on_message(filters.command("vars") & filters.user(ADMINS))
+@Bot.on_message(filters.command("vars") & admin_filter)
 async def varsFunc(client: Bot, message: Message):
     Man = await message.reply_text("Tunggu Sebentar...")
     text = f"""<u><b>CONFIG VARS</b></u> @{client.username}

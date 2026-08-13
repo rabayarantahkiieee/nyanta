@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+
+# Runtime artifacts / local state - not source
+*.db
+logs.txt
+*.json.migrated
