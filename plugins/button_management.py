@@ -2,6 +2,7 @@
 # Recode by @yawrenmaru
 # Developed By Soxmed
 
+import asyncio
 import json
 import os
 
@@ -11,6 +12,7 @@ from pyrogram import filters
 from pyrogram.parser import Parser
 from pyrogram.types import MessageEntity as _MessageEntity
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from pyromod.types import ListenerTypes
 
 from database.sql import (
     get_all_custom_buttons,
@@ -398,6 +400,75 @@ def extract_html_after_prefix(message: Message, prefix: str) -> str:
     return Parser.unparse(str(full_text)[prefix_len:], adjusted, True)
 
 
+async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: list) -> list:
+    """
+    Interactive alternative to typing [Button Text](Button URL) manually:
+    after /setmsg's content is ready, let the admin tap through adding
+    buttons one at a time via inline keyboard + prompts, instead of
+    hand-writing the markup syntax. Returns the final button list
+    (starting from whatever bracket-syntax buttons were already parsed).
+    """
+    buttons = list(buttons)
+
+    while True:
+        preview = "\n".join(f"• {b['text']} → {b['url']}" for b in buttons) or "<i>Belum ada button</i>"
+        try:
+            query = await client.ask(
+                chat_id=admin_id,
+                text=f"🔘 <b>Button saat ini:</b>\n{preview}\n\nMau tambah button?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Tambah Button", callback_data="setmsg_addbtn")],
+                    [InlineKeyboardButton("✅ Selesai", callback_data="setmsg_done")],
+                ]),
+                listener_type=ListenerTypes.CALLBACK_QUERY,
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            break
+
+        await query.answer()
+
+        if query.data == "setmsg_done":
+            await query.message.edit_text(f"🔘 <b>Button final:</b>\n{preview}")
+            break
+
+        try:
+            text_msg = await client.ask(
+                chat_id=admin_id,
+                text="✏️ <b>Kirim teks untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            break
+        if not text_msg.text or text_msg.text.strip().lower() == "batal":
+            continue
+        button_text = text_msg.text.strip()
+
+        try:
+            url_msg = await client.ask(
+                chat_id=admin_id,
+                text="🔗 <b>Kirim URL untuk button ini:</b>\n(atau ketik <code>batal</code> untuk membatalkan)",
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            break
+        button_url = (url_msg.text or "").strip()
+        if button_url.lower() == "batal":
+            continue
+
+        if not button_url.startswith(("http://", "https://", "tg://")):
+            await client.send_message(
+                admin_id,
+                "❌ <b>URL harus diawali http://, https://, atau tg://. Button ini dilewati.</b>",
+            )
+            continue
+
+        buttons.append({"text": button_text, "url": button_url})
+        await client.send_message(admin_id, f"✅ <b>Button '{button_text}' ditambahkan!</b>")
+
+    return buttons
+
+
 @Bot.on_message(filters.command("setmsg") & admin_filter)
 async def set_custom_message(client: Bot, message: Message):
     """Set custom message untuk berbagai situasi dengan support media"""
@@ -408,7 +479,9 @@ async def set_custom_message(client: Bot, message: Message):
             "<b>Types:</b> welcome, error, limit, protected, custom\n\n"
             "<b>Media Support:</b> Photo, Video, Document, Audio\n"
             "<b>Max File Size:</b> 50MB\n\n"
-            "<b>Button Support:</b> [Button Text](Button URL)\n"
+            "<b>Button Support:</b> ketik <code>[Button Text](Button URL)</code>, "
+            "atau setelah kirim command ini bakal ada tombol <b>➕ Tambah Button</b> buat nambahin secara interaktif "
+            "(gak perlu ngetik format apa-apa)\n"
             "<b>Multiple Buttons in One Row:</b> [Button1](URL1) && [Button2](URL2)\n"
             "<b>Example:</b> /setmsg welcome Hello [Click Here](https://example.com) && [Another Button](https://example.org)",
             quote=True
@@ -572,6 +645,11 @@ async def set_custom_message(client: Bot, message: Message):
                     msg_data["content"] = msg_data["content"].replace("&&", "").strip()
             except Exception as e:
                 print(f"Error parsing buttons from content: {e}")
+
+        # Offer to add buttons interactively instead of typing [Text](URL) by hand
+        msg_data["buttons"] = await collect_buttons_interactively(
+            client, message.from_user.id, msg_data["buttons"]
+        )
 
         # Save to settings
         settings = load_button_settings()

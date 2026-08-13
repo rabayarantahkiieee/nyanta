@@ -25,7 +25,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **Persistent Profile & Feedback**: Statistik profil, feedback, dan laporan user tersimpan di database (bukan file lokal) sehingga aman dari redeploy
 - **Media Broadcasting**: Support broadcast dengan media (photo/video/document)
 - **Rich Message Formatting**: Format bold/italic/blockquote di `/broadcast` & `/setmsg` otomatis kepakai persis seperti teks yang diketik/copy-paste — gak perlu ngetik tag HTML manual
-- **Enhanced /setmsg**: Support media attachments untuk custom messages
+- **Enhanced /setmsg**: Support media attachments untuk custom messages, plus tombol "➕ Tambah Button" buat nambah button secara interaktif (gak perlu ngetik format `[Text](URL)`)
 - **Personalized Messages**: Placeholder variables untuk pesan personal ({ID},{NAME},{USERNAME},{DATE}, dll)
 - **Dynamic Content**: Real-time user data replacement di broadcast messages
 - **File Search**: Cari file berdasarkan nama via `/search` atau inline query (`@botusername keyword`) langsung dari chat manapun
