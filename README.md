@@ -7,6 +7,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - **File Sharing**: Simpan file di channel dan bagi melalui link khusus
 - **Persistent Database**: PostgreSQL support untuk data yang tidak hilang saat redeploy
 - **Multiple Force Subscriptions**: Support multiple channels/groups untuk force subscription
+- **Join Request Auto-Approve**: Channel/group force-sub yang dipasangi mode "Approve New Members" otomatis di-approve bot (bot harus jadi admin di channel/group tersebut)
 - **Real-time User Tracking**: Simpan status subscribe user secara real-time tanpa reset
 - **Auto Command Registration**: Commands otomatis terdaftar di menu bot Telegram
 - **Heroku Management**: Set/unset environment variables via bot
@@ -71,6 +72,7 @@ Bot Telegram untuk menyimpan file dan berbagi melalui link khusus dengan fitur l
 - `FORCE_SUB_GROUP1`: ID group pertama untuk force subscription
 - `FORCE_SUB_GROUP2`: ID group kedua untuk force subscription (opsional)
 - `FORCE_SUB_GROUP3`: ID group ketiga untuk force subscription (opsional)
+  - Kalau channel/group force-sub-nya dipasangi mode Telegram "Approve New Members" (Join Request), bot otomatis approve request itu — tinggal pastikan bot jadi admin dengan izin "Add Users" di channel/group tersebut
 - `ADMINS`: List ID admin bot (space separated)
 - `HEROKU_APP_NAME`: Nama app Heroku
 - `HEROKU_API_KEY`: API key Heroku
