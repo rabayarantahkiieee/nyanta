@@ -501,7 +501,7 @@ async def start_command(client: Bot, message: Message):
 
     # Sync user activity - this will add or update user in database
     # Also reactivates user if they were previously blocked/deleted
-    sync_user_activity(id, user_name)
+    sync_user_activity(id, user_name, message.from_user.language_code)
     
     # Update subscription status for real-time tracking
     update_user_subscription_status(id, user_name, is_subscribed=True)
@@ -661,7 +661,7 @@ async def not_joined(client: Bot, message: Message):
     )
     
     # Sync user activity even if not subscribed (to track potential users)
-    sync_user_activity(id, user_name)
+    sync_user_activity(id, user_name, message.from_user.language_code)
     
     # Get user join info for placeholders
     join_info = get_user_join_info(id)

@@ -8,7 +8,7 @@ flow, /about, /language). Admin commands and env-configurable messages
 (START_MSG, /help, /setmsg custom messages) stay Indonesian-only.
 """
 
-from database.sql import get_user_language, set_user_language, DEFAULT_LANGUAGE
+from database.sql import get_effective_language, DEFAULT_LANGUAGE
 
 STRINGS = {
     "id": {
@@ -75,7 +75,11 @@ STRINGS = {
 
 
 def t(user_id, key, **kwargs):
-    """Translate `key` for the given user, formatting with kwargs if provided."""
-    lang = get_user_language(user_id) or DEFAULT_LANGUAGE
+    """
+    Translate `key` for the given user, formatting with kwargs if provided.
+    Uses their explicit /language choice if they made one, otherwise falls
+    back to their Telegram client's language automatically.
+    """
+    lang = get_effective_language(user_id)
     template = STRINGS.get(lang, {}).get(key) or STRINGS[DEFAULT_LANGUAGE].get(key, key)
     return template.format(**kwargs) if kwargs else template
