@@ -57,6 +57,7 @@ class User(Base):
     is_blocked = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False)
     language = Column(String(5), nullable=True)
+    language_code = Column(String(10), nullable=True)
 
 DEFAULT_LANGUAGE = "id"
 SUPPORTED_LANGUAGES = ("id", "en")
@@ -215,6 +216,14 @@ try:
                     conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR(5)"))
                     conn.commit()
                     print("[INFO] Language column added successfully")
+
+                # Check if language_code column exists, if not add it
+                result = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'language_code'"))
+                if result.fetchone() is None:
+                    print("[INFO] Adding language_code column to users table...")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN language_code VARCHAR(10)"))
+                    conn.commit()
+                    print("[INFO] language_code column added successfully")
         except Exception as migration_e:
             print(f"[WARNING] Database migration failed: {migration_e}")
             # Continue execution
@@ -228,6 +237,11 @@ try:
                     conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR(5)"))
                     conn.commit()
                     print("[INFO] Language column added successfully")
+                if "language_code" not in existing_columns:
+                    print("[INFO] Adding language_code column to users table...")
+                    conn.execute(text("ALTER TABLE users ADD COLUMN language_code VARCHAR(10)"))
+                    conn.commit()
+                    print("[INFO] language_code column added successfully")
         except Exception as migration_e:
             print(f"[WARNING] SQLite database migration failed: {migration_e}")
             # Continue execution
@@ -245,15 +259,17 @@ def get_db():
         db.close()
         raise e
 
-def add_user(user_id, username):
+def add_user(user_id, username, language_code=None):
     """
     Add or update user in database.
     This function is now more robust and handles username updates.
+    `language_code` is the user's Telegram client language (e.g. "en"),
+    used as a fallback for /language when they haven't picked one explicitly.
     """
     db = get_db()
     try:
         user = db.query(User).filter(User.user_id == user_id).first()
-        
+
         if user is None:
             # Create new user
             new_user = User(
@@ -261,7 +277,8 @@ def add_user(user_id, username):
                 username=username,
                 status=USER_STATUS_ACTIVE,
                 is_blocked=False,
-                is_deleted=False
+                is_deleted=False,
+                language_code=language_code,
             )
             db.add(new_user)
             print(f"[INFO] New user added: {user_id} (@{username})")
@@ -272,6 +289,8 @@ def add_user(user_id, username):
             user.is_blocked = False
             user.is_deleted = False
             user.last_seen = func.now()
+            if language_code:
+                user.language_code = language_code
             # Only print if username changed
             if user.username != username:
                 print(f"[INFO] User updated: {user_id} (@{username})")
@@ -349,7 +368,7 @@ def mark_user_blocked(user_id):
     """
     return update_user_status(user_id, USER_STATUS_BLOCKED, is_blocked=True, is_deleted=False)
 
-def sync_user_activity(user_id, username):
+def sync_user_activity(user_id, username, language_code=None):
     """
     Sync user activity - update last_seen and username if changed.
     Call this whenever user interacts with the bot.
@@ -362,19 +381,21 @@ def sync_user_activity(user_id, username):
             username_changed = user.username != username
             user.username = username
             user.last_seen = func.now()
-            
+            if language_code:
+                user.language_code = language_code
+
             # Reactivate user if they were blocked/deleted
             if user.status != USER_STATUS_ACTIVE:
                 user.status = USER_STATUS_ACTIVE
                 user.is_blocked = False
                 user.is_deleted = False
                 print(f"[INFO] User reactivated: {user_id} (@{username})")
-            
+
             db.commit()
             return username_changed
         else:
             # User doesn't exist, add them
-            add_user(user_id, username)
+            add_user(user_id, username, language_code=language_code)
             return True
     except Exception as e:
         db.rollback()
@@ -977,6 +998,30 @@ def set_user_language(user_id, language):
         db.rollback()
         print(f"Set user language error: {e}")
         return False
+    finally:
+        db.close()
+
+
+def get_effective_language(user_id):
+    """
+    Resolve which language to show a user: their explicit /language
+    choice if they made one, otherwise inferred from their Telegram
+    client's language_code (captured on their first interaction),
+    otherwise DEFAULT_LANGUAGE.
+    """
+    db = get_db()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            return DEFAULT_LANGUAGE
+        if user.language in SUPPORTED_LANGUAGES:
+            return user.language
+        if user.language_code and user.language_code.lower().startswith("en"):
+            return "en"
+        return DEFAULT_LANGUAGE
+    except Exception as e:
+        print(f"Get effective language error: {e}")
+        return DEFAULT_LANGUAGE
     finally:
         db.close()
 
