@@ -8,7 +8,7 @@ import os
 import re
 from datetime import datetime
 from time import time
-import logging
+from logging import getLogger
 import sys
 
 from bot import Bot
@@ -38,7 +38,7 @@ from .verification import require_verification_or_prompt
 from .i18n import t
 
 # Setup logging for broadcast system
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 
 
 # ============================================================================
