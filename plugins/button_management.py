@@ -465,6 +465,40 @@ async def _prompt_for_one_button(client: Bot, admin_id: int):
     return {"text": button_text, "url": button_url}
 
 
+async def _prompt_for_button_removal(client: Bot, admin_id: int, buttons: list):
+    """
+    Show one inline button per existing button plus a back option, and let
+    the admin tap the one to remove. Returns its index, or None if they
+    went back or the prompt timed out.
+    """
+    keyboard = [
+        [InlineKeyboardButton(f"🗑️ {b['text']}", callback_data=f"setmsg_delidx_{i}")]
+        for i, b in enumerate(buttons)
+    ]
+    keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data="setmsg_delback")])
+
+    try:
+        query = await client.ask(
+            chat_id=admin_id,
+            text="🗑️ <b>Pilih button yang mau dihapus:</b>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            listener_type=ListenerTypes.CALLBACK_QUERY,
+            timeout=60,
+        )
+    except asyncio.TimeoutError:
+        return None
+
+    await query.answer()
+
+    if query.data == "setmsg_delback":
+        return None
+
+    if query.data.startswith("setmsg_delidx_"):
+        return int(query.data.split("_")[-1])
+
+    return None
+
+
 async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: list) -> list:
     """
     Interactive alternative to typing [Button Text](Button URL) manually:
@@ -477,14 +511,17 @@ async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: lis
 
     while True:
         preview = "\n".join(f"• {b['text']} → {b['url']}" for b in buttons) or "<i>Belum ada button</i>"
+
+        keyboard = [[InlineKeyboardButton("➕ Tambah Button", callback_data="setmsg_addbtn")]]
+        if buttons:
+            keyboard.append([InlineKeyboardButton("🗑️ Hapus Button", callback_data="setmsg_delbtn")])
+        keyboard.append([InlineKeyboardButton("✅ Selesai", callback_data="setmsg_done")])
+
         try:
             query = await client.ask(
                 chat_id=admin_id,
                 text=f"🔘 <b>Button saat ini:</b>\n{preview}\n\nMau tambah button?",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ Tambah Button", callback_data="setmsg_addbtn")],
-                    [InlineKeyboardButton("✅ Selesai", callback_data="setmsg_done")],
-                ]),
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 listener_type=ListenerTypes.CALLBACK_QUERY,
                 timeout=120,
             )
@@ -497,6 +534,13 @@ async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: lis
             await query.message.edit_text(f"🔘 <b>Button final:</b>\n{preview}")
             break
 
+        if query.data == "setmsg_delbtn":
+            removed_idx = await _prompt_for_button_removal(client, admin_id, buttons)
+            if removed_idx is not None:
+                removed = buttons.pop(removed_idx)
+                await client.send_message(admin_id, f"🗑️ <b>Button '{removed['text']}' dihapus!</b>")
+            continue
+
         new_button = await _prompt_for_one_button(client, admin_id)
         if not new_button:
             continue
@@ -505,6 +549,7 @@ async def collect_buttons_interactively(client: Bot, admin_id: int, buttons: lis
         await client.send_message(admin_id, f"✅ <b>Button '{new_button['text']}' ditambahkan!</b>")
 
     return buttons
+
 
 
 @Bot.on_message(filters.command("setmsg") & admin_filter)
